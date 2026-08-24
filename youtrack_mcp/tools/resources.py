@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlparse
 
 from youtrack_mcp.api.client import YouTrackClient
 from youtrack_mcp.api.issues import IssuesClient
+from youtrack_mcp.api.pagination import get_all_pages
 from youtrack_mcp.api.projects import ProjectsClient
 from youtrack_mcp.mcp_wrappers import sync_wrapper
 
@@ -333,7 +334,11 @@ class ResourcesTools:
                         )
                         # Fall back to direct API call
                         try:
-                            comments = self.client.get(f"issues/{issue_id}/comments")
+                            comments = get_all_pages(
+                                self.client,
+                                f"issues/{issue_id}/comments",
+                                fields="id,text,created,updated,author(id,login,name)",
+                            )
                             return json.dumps(
                                 {
                                     "contents": [
@@ -507,34 +512,16 @@ class ResourcesTools:
     def get_issue(self, issue_id: str) -> str:
         """Get a specific issue as a resource."""
         try:
-            try:
-                # First try to get the issue using the issues_api
-                issue = self.issues_api.get_issue(issue_id)
-
-                # Convert to dict if it's a model
-                if hasattr(issue, "model_dump"):
-                    issue_data = issue.model_dump()
-                else:
-                    issue_data = issue
-            except Exception as api_error:
-                logger.warning(f"Error retrieving issue with issues_api: {api_error}")
-
-                # Fall back to direct API call
-                try:
-                    # Try direct API call to get raw issue data
-                    issue_data = self.client.get(f"issues/{issue_id}")
-
-                    # Ensure id is present in the response
-                    if (
-                        "id" not in issue_data
-                        and "$type" in issue_data
-                        and issue_data.get("$type") == "Issue"
-                    ):
-                        # If id is missing but we know it's an issue, add the ID from our parameter
-                        issue_data["id"] = issue_id
-                except Exception as direct_error:
-                    logger.error(f"Error with direct API call: {direct_error}")
-                    raise
+            fields = (
+                "id,idReadable,summary,description,created,updated,resolved,"
+                "project(id,name,shortName),"
+                "reporter(id,login,name,fullName),"
+                "updater(id,login,name,fullName),"
+                "customFields(id,name,value("
+                "$type,id,name,text,presentation,login,fullName)),"
+                "tags(name)"
+            )
+            issue_data = self.client.get(f"issues/{issue_id}?fields={fields}")
 
             return json.dumps(
                 {
@@ -561,8 +548,10 @@ class ResourcesTools:
             # First try to get detailed comments
             try:
                 # Attempt to get full comment details with content
-                comments_with_details = self.client.get(
-                    f"issues/{issue_id}/comments?fields=id,text,created,updated,author(id,login,name)"
+                comments_with_details = get_all_pages(
+                    self.client,
+                    f"issues/{issue_id}/comments",
+                    fields="id,text,created,updated,author(id,login,name,fullName)",
                 )
                 logger.debug(
                     f"Retrieved {len(comments_with_details)} comments for issue: {issue_id}"
@@ -587,7 +576,11 @@ class ResourcesTools:
                 )
 
                 # Fall back to basic comment list
-                comments = self.client.get(f"issues/{issue_id}/comments")
+                comments = get_all_pages(
+                    self.client,
+                    f"issues/{issue_id}/comments",
+                    fields="id,text,created,updated,author(id,login,name)",
+                )
 
                 return json.dumps(
                     {

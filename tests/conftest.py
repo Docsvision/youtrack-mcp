@@ -22,6 +22,28 @@ def test_config() -> Dict[str, str]:
     }
 
 
+@pytest.fixture(scope="function", autouse=True)
+def legacy_tests_use_mutating_tool_registry():
+    """Keep legacy unit tests independent from the production security default."""
+    from youtrack_mcp import mcp_wrappers
+    from youtrack_mcp.config import Config
+    from youtrack_mcp.tools import loader
+
+    configs = {
+        id(Config): Config,
+        id(loader.Config): loader.Config,
+        id(mcp_wrappers.Config): mcp_wrappers.Config,
+    }.values()
+    originals = [(config, config.READ_ONLY_MODE) for config in configs]
+    for config, _ in originals:
+        config.READ_ONLY_MODE = False
+    try:
+        yield
+    finally:
+        for config, original in originals:
+            config.READ_ONLY_MODE = original
+
+
 @pytest.fixture(scope="function")
 def mock_youtrack_client():
     """Mock YouTrack client for testing without real API calls."""
@@ -118,12 +140,6 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "integration: Integration tests (mocked external services)"
     )
-    config.addinivalue_line(
-        "markers", "e2e: End-to-end tests (real external services)"
-    )
-    config.addinivalue_line(
-        "markers", "docker: Docker container tests"
-    )
-    config.addinivalue_line(
-        "markers", "slow: Slow running tests"
-    )
+    config.addinivalue_line("markers", "e2e: End-to-end tests (real external services)")
+    config.addinivalue_line("markers", "docker: Docker container tests")
+    config.addinivalue_line("markers", "slow: Slow running tests")

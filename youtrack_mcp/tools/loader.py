@@ -12,6 +12,7 @@ import os
 
 from youtrack_mcp.mcp_wrappers import create_bound_tool
 from youtrack_mcp.config import Config
+from youtrack_mcp.read_only import is_read_only_tool
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -56,6 +57,16 @@ def filter_tools(tools: Dict[str, Callable]) -> Dict[str, Callable]:
     Returns:
         Filtered dictionary of tools
     """
+    if Config.READ_ONLY_MODE:
+        rejected = {name for name in tools if not is_read_only_tool(name)}
+        tools = {name: tool for name, tool in tools.items() if is_read_only_tool(name)}
+        if rejected:
+            logger.info(
+                "Read-only mode disabled %d mutating or unknown tools: %s",
+                len(rejected),
+                ", ".join(sorted(rejected)),
+            )
+
     # Get all available tool names (normalized for comparison)
     available_tools = {Config._normalize_tool_name(name): name for name in tools}
 

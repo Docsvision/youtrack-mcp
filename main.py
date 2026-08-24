@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 YouTrack MCP Server - A Model Context Protocol server for JetBrains YouTrack.
-Uses FastMCP directly for clean stdio/SSE transport support.
+Uses FastMCP directly for stdio, SSE, and Streamable HTTP transport support.
 """
 import logging
 import os
@@ -45,7 +45,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="YouTrack MCP Server")
-    parser.add_argument("--transport", choices=["stdio", "sse"], default=None,
+    parser.add_argument("--transport", choices=["stdio", "sse", "streamable-http"], default=None,
                         help="Transport mode (default: from TRANSPORT env var, fallback stdio)")
     parser.add_argument("--host", default="0.0.0.0", help="Host for SSE transport")
     parser.add_argument("--port", type=int, default=None, help="Port for SSE transport")

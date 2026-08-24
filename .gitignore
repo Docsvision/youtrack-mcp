@@ -3,6 +3,11 @@
 .env.backup
 .env.local
 .env.*.local
+deploy/*.env
+deploy/secrets/*.token
+deploy/secrets/*.key
+!deploy/*.env.example
+!deploy/secrets/*.example
 .cursorrules
 .cursor/
 

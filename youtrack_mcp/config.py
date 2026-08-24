@@ -55,6 +55,38 @@ class Config:
     # Tool filtering configuration
     DISABLED_TOOLS: str = os.getenv("DISABLED_TOOLS", "")
     ENABLED_TOOLS: str = os.getenv("ENABLED_TOOLS", "")
+    # Fail-closed operation policy. Enabled by default for safe MCP usage.
+    READ_ONLY_MODE: bool = os.getenv("YOUTRACK_READ_ONLY", "true").lower() in (
+        "true",
+        "1",
+        "yes",
+        "on",
+    )
+
+    # Central output sanitization. Point this at a trusted local sidecar that
+    # returns {"payload": <sanitized value>} for each request.
+    SANITIZER_URL: str = os.getenv("YOUTRACK_SANITIZER_URL", "")
+    SANITIZER_TIMEOUT: float = float(os.getenv("YOUTRACK_SANITIZER_TIMEOUT", "5.0"))
+    SANITIZER_FAIL_CLOSED: bool = os.getenv(
+        "YOUTRACK_SANITIZER_FAIL_CLOSED", "true"
+    ).lower() in ("true", "1", "yes")
+    SANITIZER_REQUIRED: bool = os.getenv(
+        "YOUTRACK_SANITIZER_REQUIRED", "false"
+    ).lower() in ("true", "1", "yes")
+    COMPANY_SANITIZATION_ENABLED: bool = os.getenv(
+        "YOUTRACK_COMPANY_SANITIZATION", "true"
+    ).lower() in ("true", "1", "yes")
+    COMPANY_SANITIZATION_REQUIRED: bool = os.getenv(
+        "YOUTRACK_COMPANY_SANITIZATION_REQUIRED", "true"
+    ).lower() in ("true", "1", "yes")
+    COMPANY_PROJECT: str = os.getenv("YOUTRACK_COMPANY_PROJECT", "SUP")
+    COMPANY_FIELD: str = os.getenv("YOUTRACK_COMPANY_FIELD", "Клиент")
+    COMPANY_REFRESH_SECONDS: float = float(
+        os.getenv("YOUTRACK_COMPANY_REFRESH_SECONDS", "86400")
+    )
+    COMPANY_PSEUDONYM_KEY: str = os.getenv(
+        "YOUTRACK_COMPANY_PSEUDONYM_KEY", ""
+    )
 
     @classmethod
     def _normalize_tool_name(cls, name: str) -> str:
@@ -226,7 +258,7 @@ class Config:
         # If URL is explicitly provided, use it regardless of cloud setting
         if cls.YOUTRACK_URL:
             # Remove trailing slash to prevent double slashes
-            clean_url = cls.YOUTRACK_URL.rstrip('/')
+            clean_url = cls.YOUTRACK_URL.rstrip("/")
             return f"{clean_url}/api"
 
         # For cloud instances without explicit URL, try to extract from token

@@ -30,7 +30,10 @@ class TestToolNameNormalization:
     def test_normalize_combined(self):
         """Test combined normalization."""
         assert Config._normalize_tool_name("  Get-Issue  ") == "get_issue"
-        assert Config._normalize_tool_name("  SEARCH-WITH-FILTER  ") == "search_with_filter"
+        assert (
+            Config._normalize_tool_name("  SEARCH-WITH-FILTER  ")
+            == "search_with_filter"
+        )
 
 
 class TestConfigParsing:
@@ -235,7 +238,9 @@ class TestFilterTools:
     @pytest.mark.unit
     def test_denylist_all_tools(self, sample_tools):
         """Test disabling all tools."""
-        Config.DISABLED_TOOLS = "get_issue,create_issue,search_issues,get_projects,get_user"
+        Config.DISABLED_TOOLS = (
+            "get_issue,create_issue,search_issues,get_projects,get_user"
+        )
         Config.ENABLED_TOOLS = ""
         result = filter_tools(sample_tools)
         assert len(result) == 0
@@ -302,6 +307,7 @@ class TestFilterToolsLogging:
         Config.ENABLED_TOOLS = ""
 
         import logging
+
         with caplog.at_level(logging.INFO):
             filter_tools(sample_tools)
 
@@ -315,9 +321,41 @@ class TestFilterToolsLogging:
         Config.DISABLED_TOOLS = ""
 
         import logging
+
         with caplog.at_level(logging.INFO):
             filter_tools(sample_tools)
 
         assert "Allowlist mode" in caplog.text
         assert "1 tool enabled" in caplog.text
         assert "2 tools disabled" in caplog.text
+
+
+class TestReadOnlyFiltering:
+    @pytest.mark.unit
+    def test_read_only_mode_cannot_be_overridden_by_enabled_tools(self):
+        Config.READ_ONLY_MODE = True
+        Config.ENABLED_TOOLS = "get_issue,create_issue"
+        tools = {"get_issue": Mock(), "create_issue": Mock()}
+
+        result = filter_tools(tools)
+
+        assert set(result) == {"get_issue"}
+
+    @pytest.mark.unit
+    def test_read_only_mode_rejects_unknown_tools_by_default(self):
+        Config.READ_ONLY_MODE = True
+        Config.ENABLED_TOOLS = ""
+        tools = {"get_issue": Mock(), "export_everything": Mock()}
+
+        result = filter_tools(tools)
+
+        assert set(result) == {"get_issue"}
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        "tool_name",
+        ["create_issue", "update_issue", "add_comment", "delete_attachment"],
+    )
+    def test_read_only_mode_rejects_known_mutations(self, tool_name):
+        Config.READ_ONLY_MODE = True
+        Config.ENABLED_TOOLS = ""

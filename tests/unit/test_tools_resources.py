@@ -235,7 +235,7 @@ class TestResourcesToolsReadResource:
         mock_projects_client_class.return_value = mock_projects_api
 
         # Mock issues response with proper dictionary
-        mock_issues_api.get_issue.return_value = {
+        mock_client.get.return_value = {
             "id": "2-123",
             "idReadable": "DEMO-123",
             "summary": "Test Issue"
@@ -243,6 +243,11 @@ class TestResourcesToolsReadResource:
 
         tools = ResourcesTools()
         result = tools.read_resource("youtrack:///issues/DEMO-123")
+        request_path = mock_client.get.call_args.args[0]
+        assert request_path.startswith("issues/DEMO-123?fields=")
+        assert "customFields(" in request_path
+        assert "reporter(" in request_path
+        assert "tags(name)" in request_path
 
         result_data = json.loads(result)
         content = result_data["contents"][0]

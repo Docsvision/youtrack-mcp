@@ -4,6 +4,7 @@ Comprehensive unit tests for YouTrack MCP wrappers.
 
 import pytest
 import json
+from youtrack_mcp.config import Config
 import logging
 from unittest.mock import Mock, patch, MagicMock
 
@@ -100,9 +101,7 @@ class TestProcessParameters:
         args = ("test1", "test2")
         kwargs = {"param1": "value1", "param2": "value2"}
 
-        processed_args, processed_kwargs = process_parameters(
-            "test_func", args, kwargs
-        )
+        processed_args, processed_kwargs = process_parameters("test_func", args, kwargs)
 
         assert processed_args == ("test1", "test2")
         assert processed_kwargs == {"param1": "value1", "param2": "value2"}
@@ -113,9 +112,7 @@ class TestProcessParameters:
         args = ()
         kwargs = {"args": '{"project": "TEST", "issue_id": "123"}'}
 
-        processed_args, processed_kwargs = process_parameters(
-            "test_func", args, kwargs
-        )
+        processed_args, processed_kwargs = process_parameters("test_func", args, kwargs)
 
         assert processed_args == ()
         assert processed_kwargs["project"] == "TEST"
@@ -128,9 +125,7 @@ class TestProcessParameters:
         args = ()
         kwargs = {"args": "simple_value"}
 
-        processed_args, processed_kwargs = process_parameters(
-            "test_func", args, kwargs
-        )
+        processed_args, processed_kwargs = process_parameters("test_func", args, kwargs)
 
         assert processed_args == ("simple_value",)
         assert "args" not in processed_kwargs
@@ -141,9 +136,7 @@ class TestProcessParameters:
         args = ()
         kwargs = {"args": ""}
 
-        processed_args, processed_kwargs = process_parameters(
-            "test_func", args, kwargs
-        )
+        processed_args, processed_kwargs = process_parameters("test_func", args, kwargs)
 
         assert processed_args == ()
         assert "args" not in processed_kwargs
@@ -152,9 +145,7 @@ class TestProcessParameters:
     def test_process_parameters_with_invalid_json_args(self):
         """Test parameter processing with invalid JSON in args."""
         args = ()
-        kwargs = {
-            "args": '{"invalid": json}'
-        }  # Looks like JSON but is invalid
+        kwargs = {"args": '{"invalid": json}'}  # Looks like JSON but is invalid
 
         with patch("youtrack_mcp.mcp_wrappers.logger") as mock_logger:
             processed_args, processed_kwargs = process_parameters(
@@ -175,9 +166,7 @@ class TestProcessParameters:
         args = ()
         kwargs = {"kwargs": '{"param1": "value1", "param2": "value2"}'}
 
-        processed_args, processed_kwargs = process_parameters(
-            "test_func", args, kwargs
-        )
+        processed_args, processed_kwargs = process_parameters("test_func", args, kwargs)
 
         assert processed_args == ()
         assert processed_kwargs["param1"] == "value1"
@@ -190,9 +179,7 @@ class TestProcessParameters:
         args = ()
         kwargs = {"kwargs": {"param1": "value1", "param2": "value2"}}
 
-        processed_args, processed_kwargs = process_parameters(
-            "test_func", args, kwargs
-        )
+        processed_args, processed_kwargs = process_parameters("test_func", args, kwargs)
 
         assert processed_args == ()
         assert processed_kwargs["param1"] == "value1"
@@ -438,7 +425,7 @@ class TestCreateBoundTool:
         assert isinstance(result, str)
         error_data = json.loads(result)
         assert error_data["status"] == "error"
-        assert "Method error" in error_data["error"]
+        assert error_data["error"] == "Error calling failing_method"
 
     @pytest.mark.unit
     def test_create_bound_tool_preserves_method_binding(self):
@@ -521,9 +508,7 @@ class TestIntegrationScenarios:
 
         # Test with JSON args
         bound_tool = create_bound_tool(instance, "create_issue")
-        result = bound_tool(
-            args='{"project_id": "TEST", "summary": "New issue"}'
-        )
+        result = bound_tool(args='{"project_id": "TEST", "summary": "New issue"}')
 
         # project_id should be normalized to project
         assert result == {
@@ -576,9 +561,7 @@ class TestIntegrationScenarios:
 
         # Test invalid JSON in kwargs - should trigger line 129-130
         with patch("youtrack_mcp.mcp_wrappers.logger") as mock_logger:
-            result = bound_tool(
-                kwargs='{"invalid": json}'
-            )  # Invalid JSON syntax
+            result = bound_tool(kwargs='{"invalid": json}')  # Invalid JSON syntax
 
             # Should log warning about JSON parsing failure
             mock_logger.warning.assert_called()
@@ -610,3 +593,49 @@ class TestIntegrationScenarios:
 
             # Should use default parameter since kwargs was not processed
             assert result == {"project": "default"}
+
+
+class TestReadOnlyBoundary:
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        "tool_name",
+        ["create_issue", "update_project", "add_comment", "delete_attachment"],
+    )
+    def test_mutation_is_blocked_before_method_call(self, tool_name):
+        class MutatingTools:
+            called = False
+
+        def mutation(self, **kwargs):
+            self.called = True
+            return {"mutated": True}
+
+        setattr(MutatingTools, tool_name, mutation)
+        instance = MutatingTools()
+        Config.READ_ONLY_MODE = True
+        bound_tool = create_bound_tool(instance, tool_name)
+
+        result = json.loads(bound_tool())
+
+        assert instance.called is False
+        assert result == {
+            "error": "Tool disabled: YouTrack MCP is in read-only mode",
+            "status": "error",
+        }
+
+    @pytest.mark.unit
+    def test_explicit_read_tool_still_calls_method(self):
+        class ReadTools:
+            called = False
+
+            def get_issue(self, issue_id):
+                self.called = True
+                return {"id": issue_id}
+
+        instance = ReadTools()
+        Config.READ_ONLY_MODE = True
+        bound_tool = create_bound_tool(instance, "get_issue")
+
+        result = bound_tool(issue_id="DEMO-1")
+
+        assert instance.called is True
+        assert result == {"id": "DEMO-1"}

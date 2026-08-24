@@ -1,0 +1,140 @@
+name: youtrack-mcp-dual
+
+x-mcp-common: &mcp-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: youtrack-mcp:local
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  environment: &mcp-environment
+    TRANSPORT: streamable-http
+    PORT: "8000"
+    YOUTRACK_READ_ONLY: "true"
+    ENABLED_TOOLS: get_issue,search_issues,get_issue_comments,get_issue_links,get_projects
+    YOUTRACK_TOKEN_FILE: /run/secrets/youtrack_token
+  healthcheck:
+    test:
+      - CMD
+      - python
+      - -c
+      - >-
+        import socket;
+        connection = socket.create_connection(('127.0.0.1', 8000), 5);
+        connection.close()
+    interval: 30s
+    timeout: 6s
+    retries: 3
+    start_period: 20s
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "5"
+
+services:
+  sanitizer:
+    build:
+      context: .
+      dockerfile: sanitizer_service/Dockerfile
+    image: youtrack-mcp-sanitizer:local
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      SANITIZER_PROFILE: diagnostic
+      SANITIZER_PII_SCORE_THRESHOLD: "0.4"
+      SANITIZER_PSEUDONYM_KEY_FILE: /run/secrets/sanitizer_pseudonym_key
+      SANITIZER_ALLOWED_CUSTOM_FIELDS: State,Priority,Type,Subsystem,Fix versions,Affected versions,Estimation,Assignee
+    secrets:
+      - sanitizer_pseudonym_key
+    expose:
+      - "8090"
+    networks:
+      - sanitizer_internal
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=5)
+      interval: 30s
+      timeout: 6s
+      retries: 5
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+  mcp-sanitized:
+    <<: *mcp-common
+    env_file:
+      - ./deploy/mcp-sanitized.env
+    environment:
+      <<: *mcp-environment
+      MCP_SERVER_NAME: youtrack-mcp-sanitized
+      MCP_SERVER_DESCRIPTION: Read-only YouTrack MCP with mandatory output sanitization
+      YOUTRACK_SANITIZER_URL: http://sanitizer:8090/sanitize
+      YOUTRACK_SANITIZER_TIMEOUT: "30"
+      YOUTRACK_SANITIZER_FAIL_CLOSED: "true"
+      YOUTRACK_SANITIZER_REQUIRED: "true"
+      YOUTRACK_COMPANY_SANITIZATION: "true"
+      YOUTRACK_COMPANY_SANITIZATION_REQUIRED: "true"
+      YOUTRACK_COMPANY_PROJECT: SUP
+      YOUTRACK_COMPANY_FIELD: Клиент
+      YOUTRACK_COMPANY_REFRESH_SECONDS: "86400"
+    secrets:
+      - source: youtrack_sanitized_token
+        target: youtrack_token
+    depends_on:
+      sanitizer:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8001:8000"
+    networks:
+      - default
+      - sanitizer_internal
+
+  mcp-plain:
+    <<: *mcp-common
+    env_file:
+      - ./deploy/mcp-plain.env
+    environment:
+      <<: *mcp-environment
+      MCP_SERVER_NAME: youtrack-mcp-plain
+      MCP_SERVER_DESCRIPTION: Read-only YouTrack MCP without output sanitization
+      YOUTRACK_SANITIZER_URL: ""
+      YOUTRACK_SANITIZER_REQUIRED: "false"
+      YOUTRACK_COMPANY_SANITIZATION: "false"
+    secrets:
+      - source: youtrack_plain_token
+        target: youtrack_token
+    ports:
+      - "127.0.0.1:8002:8000"
+
+networks:
+  sanitizer_internal:
+    internal: true
+
+secrets:
+  youtrack_sanitized_token:
+    file: ./deploy/secrets/youtrack-sanitized.token
+  youtrack_plain_token:
+    file: ./deploy/secrets/youtrack-plain.token
+  sanitizer_pseudonym_key:
+    file: ./deploy/secrets/sanitizer-pseudonym.key

@@ -10,6 +10,7 @@ import re
 from pydantic import BaseModel, Field
 
 from youtrack_mcp.api.client import YouTrackClient, YouTrackAPIError
+from youtrack_mcp.api.pagination import get_all_pages
 
 logger = logging.getLogger(__name__)
 
@@ -1288,9 +1289,23 @@ class IssuesClient:
         Returns:
             Dictionary containing inward and outward issue links
         """
-        fields = "id,summary,linkType(name,localizedName),direction"
-        response = self.client.get(f"issues/{issue_id}/links?fields={fields}")
-        return response
+        links = get_all_pages(
+            self.client,
+            f"issues/{issue_id}/links",
+            fields=(
+                "id,direction,"
+                "linkType(name,localizedName,sourceToTarget,targetToSource)"
+            ),
+        )
+        for link in links:
+            if not isinstance(link, dict) or not link.get("id"):
+                continue
+            link["issues"] = get_all_pages(
+                self.client,
+                f"issues/{issue_id}/links/{link['id']}/issues",
+                fields="id,idReadable,summary",
+            )
+        return links
 
     def get_available_link_types(self) -> dict:
         """
@@ -2575,9 +2590,23 @@ class IssuesClient:
         Returns:
             Dictionary containing inward and outward issue links
         """
-        fields = "id,summary,linkType(name,localizedName),direction"
-        response = self.client.get(f"issues/{issue_id}/links?fields={fields}")
-        return response
+        links = get_all_pages(
+            self.client,
+            f"issues/{issue_id}/links",
+            fields=(
+                "id,direction,"
+                "linkType(name,localizedName,sourceToTarget,targetToSource)"
+            ),
+        )
+        for link in links:
+            if not isinstance(link, dict) or not link.get("id"):
+                continue
+            link["issues"] = get_all_pages(
+                self.client,
+                f"issues/{issue_id}/links/{link['id']}/issues",
+                fields="id,idReadable,summary",
+            )
+        return links
 
     def get_available_link_types(self) -> dict:
         """

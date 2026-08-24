@@ -1,0 +1,22 @@
+services:
+  sanitizer:
+    build:
+      context: .
+      dockerfile: sanitizer_service/Dockerfile
+    ports:
+      - "127.0.0.1:8090:8090"
+    environment:
+      SANITIZER_PROFILE: diagnostic
+      SANITIZER_PSEUDONYM_KEY: "${SANITIZER_PSEUDONYM_KEY:?Set SANITIZER_PSEUDONYM_KEY}"
+      SANITIZER_PII_SCORE_THRESHOLD: "0.4"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8090/health')
+      interval: 30s
+      timeout: 5s
+      retries: 3

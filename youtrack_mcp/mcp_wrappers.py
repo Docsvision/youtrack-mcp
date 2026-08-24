@@ -12,6 +12,15 @@ from functools import wraps, partial
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 logger = logging.getLogger(__name__)
+from youtrack_mcp.config import Config
+from youtrack_mcp.read_only import is_read_only_tool
+
+
+def _sanitize_tool_result(tool_name: str, result: Any) -> Any:
+    """Apply the mandatory process-wide boundary before FastMCP sees a result."""
+    from youtrack_mcp.sanitization import get_output_sanitization_boundary
+
+    return get_output_sanitization_boundary().sanitize(tool_name, result)
 
 
 def sync_wrapper(func: Callable) -> Callable:
@@ -104,19 +113,21 @@ def process_parameters(
         # Process args_value based on its type
         if isinstance(args_value, str):
             # Try to parse as JSON if it looks like JSON
-            if args_value.strip().startswith(
-                "{"
-            ) and args_value.strip().endswith("}"):
+            if args_value.strip().startswith("{") and args_value.strip().endswith("}"):
                 try:
                     # Clean up common JSON formatting issues
                     cleaned_json = args_value.strip()
                     # Remove extra closing braces (common MCP issue)
-                    if cleaned_json.count('}') > cleaned_json.count('{'):
-                        logger.info(f"Fixing JSON with extra closing braces: {cleaned_json}")
+                    if cleaned_json.count("}") > cleaned_json.count("{"):
+                        logger.info(
+                            f"Fixing JSON with extra closing braces: {cleaned_json}"
+                        )
                         # Remove extra } from the end
-                        while cleaned_json.endswith('}}') and cleaned_json.count('}') > cleaned_json.count('{'):
+                        while cleaned_json.endswith("}}") and cleaned_json.count(
+                            "}"
+                        ) > cleaned_json.count("{"):
                             cleaned_json = cleaned_json[:-1]
-                    
+
                     args_dict = json.loads(cleaned_json)
                     if isinstance(args_dict, dict):
                         # Add each key-value pair to kwargs
@@ -145,19 +156,23 @@ def process_parameters(
         # Process kwargs_value based on its type
         if isinstance(kwargs_value, str):
             # Try to parse as JSON if it looks like JSON
-            if kwargs_value.strip().startswith(
-                "{"
-            ) and kwargs_value.strip().endswith("}"):
+            if kwargs_value.strip().startswith("{") and kwargs_value.strip().endswith(
+                "}"
+            ):
                 try:
                     # Clean up common JSON formatting issues
                     cleaned_json = kwargs_value.strip()
                     # Remove extra closing braces (common MCP issue)
-                    if cleaned_json.count('}') > cleaned_json.count('{'):
-                        logger.info(f"Fixing JSON with extra closing braces: {cleaned_json}")
+                    if cleaned_json.count("}") > cleaned_json.count("{"):
+                        logger.info(
+                            f"Fixing JSON with extra closing braces: {cleaned_json}"
+                        )
                         # Remove extra } from the end
-                        while cleaned_json.endswith('}}') and cleaned_json.count('}') > cleaned_json.count('{'):
+                        while cleaned_json.endswith("}}") and cleaned_json.count(
+                            "}"
+                        ) > cleaned_json.count("{"):
                             cleaned_json = cleaned_json[:-1]
-                    
+
                     kwargs_dict = json.loads(cleaned_json)
                     if isinstance(kwargs_dict, dict):
                         # Add each key-value pair to kwargs
@@ -168,9 +183,7 @@ def process_parameters(
                         f"Failed to parse kwargs as JSON: {kwargs_value}. Error: {str(e)}"
                     )
             elif kwargs_value:
-                logger.warning(
-                    f"Received kwargs as non-JSON string: {kwargs_value}"
-                )
+                logger.warning(f"Received kwargs as non-JSON string: {kwargs_value}")
         elif isinstance(kwargs_value, dict):
             # Add each key-value pair to kwargs
             for k, v in kwargs_value.items():
@@ -182,9 +195,7 @@ def process_parameters(
     return tuple(processed_args), normalized_kwargs
 
 
-def normalize_parameter_names(
-    func_name: str, kwargs: Dict[str, Any]
-) -> Dict[str, Any]:
+def normalize_parameter_names(func_name: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
     """
     Normalize parameter names based on common naming conventions and specific tool needs.
 
@@ -235,12 +246,8 @@ def normalize_parameter_names(
             normalized["issue_id"] = normalized.pop("issue_key")
 
     # User tools mappings - most user functions expect user_id parameter
-    user_tools_methods = [
-        "get_user", 
-        "get_user_by_id", 
-        "get_user_permissions"
-    ]
-    
+    user_tools_methods = ["get_user", "get_user_by_id", "get_user_permissions"]
+
     if func_name in user_tools_methods:
         # For user tools, ensure user is mapped to user_id
         if "user" in normalized and "user_id" not in normalized:
@@ -249,7 +256,7 @@ def normalize_parameter_names(
         # For other tools, keep the old mapping if needed
         if "user_id" in normalized and "user" not in normalized:
             normalized["user"] = normalized.pop("user_id")
-    
+
     # Special handling for search_with_filter
     if func_name == "search_with_filter":
         # Handle query parameter - try to parse simple "project: VALUE" format
@@ -259,7 +266,7 @@ def normalize_parameter_names(
             if query.startswith("project:"):
                 project_value = query.split(":", 1)[1].strip()
                 normalized["project"] = project_value
-        
+
         # Handle filters parameter - extract individual filters
         if "filters" in normalized:
             filters = normalized.pop("filters")
@@ -299,19 +306,29 @@ def create_bound_tool(instance: Any, method_name: str) -> Callable:
     # Create a function that maintains the binding
     @wraps(method)
     def bound_wrapper(*args, **kwargs):
+        # This guard runs before parameter processing and, critically, before
+        # any method can make an HTTP request to YouTrack.
+        if Config.READ_ONLY_MODE and not is_read_only_tool(method_name):
+            logger.warning("Blocked mutating or unknown tool '%s'", method_name)
+            return json.dumps(
+                {
+                    "error": "Tool disabled: YouTrack MCP is in read-only mode",
+                    "status": "error",
+                }
+            )
+
         # Process the parameters to get the correct format
-        processed_args, processed_kwargs = process_parameters(
-            method_name, args, kwargs
-        )
+        processed_args, processed_kwargs = process_parameters(method_name, args, kwargs)
 
         # Call the method with the processed parameters
         try:
-            return method(**processed_kwargs)
+            result = method(**processed_kwargs)
+            return _sanitize_tool_result(method_name, result)
         except Exception as e:
             logger.exception(f"Error calling {method_name}: {str(e)}")
             return json.dumps(
                 {
-                    "error": f"Error calling {method_name}: {str(e)}",
+                    "error": f"Error calling {method_name}",
                     "status": "error",
                 }
             )
