@@ -122,7 +122,7 @@ class OutputSanitizationBoundary:
 
         for content in payload["contents"]:
             if isinstance(content, dict) and not isinstance(content.get("text"), str):
-                content["text"] = json.dumps(content.get("text"))
+                content["text"] = json.dumps(content.get("text"), ensure_ascii=False)
         return payload
 
     def sanitize(self, tool_name: str, result: Any) -> Any:
@@ -157,7 +157,7 @@ class OutputSanitizationBoundary:
         sanitized = self._encode_resource_text(sanitized)
 
         if was_json_string:
-            return json.dumps(sanitized, indent=2)
+            return json.dumps(sanitized, indent=2, ensure_ascii=False)
         return sanitized
 
 

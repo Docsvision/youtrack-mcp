@@ -60,6 +60,28 @@ def test_boundary_exposes_nested_resource_json_to_backend():
 
 
 @pytest.mark.unit
+def test_boundary_keeps_unicode_readable_in_resource_json():
+    sanitized_resource = {
+        "contents": [
+            {
+                "mimeType": "application/json",
+                "text": {"summary": "Поддержка временных зон"},
+            }
+        ]
+    }
+    boundary = OutputSanitizationBoundary(RecordingSanitizer(sanitized_resource))
+
+    result = boundary.sanitize("get_issue", json.dumps({"contents": []}))
+
+    assert "Поддержка временных зон" in result
+    assert "\\u041f" not in result
+    envelope = json.loads(result)
+    assert json.loads(envelope["contents"][0]["text"])["summary"] == (
+        "Поддержка временных зон"
+    )
+
+
+@pytest.mark.unit
 def test_boundary_sanitizes_plain_text_without_changing_its_type():
     backend = RecordingSanitizer("Contact [PERSON]")
     boundary = OutputSanitizationBoundary(backend)

@@ -2,7 +2,11 @@
 
 import pytest
 
-from sanitizer_service.service import OutputPolicy, PolicyViolation
+from sanitizer_service.service import (
+    OutputPolicy,
+    PolicyViolation,
+    PresidioAndSecretsSanitizer,
+)
 
 
 class FakeTextSanitizer:
@@ -57,6 +61,53 @@ def test_comment_policy_drops_author(policy):
     )
 
     assert result == [{"text": "Contact [PERSON] at [EMAIL_ADDRESS]", "created": 123}]
+
+
+def test_comment_policy_batches_text_sanitization():
+    class BatchTextSanitizer:
+        def __init__(self):
+            self.batches = []
+
+        def sanitize(self, text: str) -> str:
+            raise AssertionError("comments must use batch sanitization")
+
+        def sanitize_many(self, texts: list[str]) -> list[str]:
+            self.batches.append(texts)
+            return [text.replace("secret", "[SECRET]") for text in texts]
+
+    text_sanitizer = BatchTextSanitizer()
+    batch_policy = OutputPolicy(text_sanitizer, profile="strict")
+    comments = [{"text": f"comment {index} secret"} for index in range(20)]
+
+    result = batch_policy.sanitize("get_issue_comments", comments)
+
+    assert text_sanitizer.batches == [
+        [f"comment {index} secret" for index in range(20)]
+    ]
+    assert [comment["text"] for comment in result] == [
+        f"comment {index} [SECRET]" for index in range(20)
+    ]
+
+
+def test_presidio_batch_runs_only_two_language_analyses():
+    class RecordingAnalyzer:
+        def __init__(self):
+            self.calls = []
+
+        def analyze(self, *, text, language, score_threshold):
+            self.calls.append((text, language, score_threshold))
+            return []
+
+    sanitizer = PresidioAndSecretsSanitizer.__new__(PresidioAndSecretsSanitizer)
+    sanitizer._analyzer = RecordingAnalyzer()
+    sanitizer._score_threshold = 0.4
+    sanitizer._redact_secrets = lambda text: text
+
+    texts = [f"Комментарий {index}" for index in range(20)]
+    result = sanitizer.sanitize_many(texts)
+
+    assert result == texts
+    assert [call[1] for call in sanitizer._analyzer.calls] == ["ru", "en"]
 
 
 def test_resource_envelope_is_sanitized_and_uri_is_removed(policy):

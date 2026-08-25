@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import secrets
+from copy import copy
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -122,7 +123,7 @@ class PresidioAndSecretsSanitizer:
             text = text.replace(value, "[SECRET]")
         return text
 
-    def _redact_pii(self, text: str) -> str:
+    def _analyze_pii(self, text: str) -> list[Any]:
         results = []
         # Russian finds named entities. English also runs the standard Presidio
         # recognizers for language-independent patterns such as email and IP.
@@ -135,11 +136,16 @@ class PresidioAndSecretsSanitizer:
                 )
             )
 
-        unique_results = {
-            (item.start, item.end, item.entity_type): item
-            for item in results
-            if item.entity_type != "DATE_TIME"
-        }.values()
+        return results
+
+    def _anonymize_pii(self, text: str, results: list[Any]) -> str:
+        unique_results = list(
+            {
+                (item.start, item.end, item.entity_type): item
+                for item in results
+                if item.entity_type != "DATE_TIME"
+            }.values()
+        )
         if not unique_results:
             return text
 
@@ -155,8 +161,44 @@ class PresidioAndSecretsSanitizer:
             operators=operators,
         ).text
 
+    def _redact_pii(self, text: str) -> str:
+        return self._anonymize_pii(text, self._analyze_pii(text))
+
+    def _redact_pii_many(self, texts: list[str]) -> list[str]:
+        """Analyze a collection with two NLP passes instead of two per item."""
+        if not texts:
+            return []
+
+        separator = "\n\n"
+        offsets: list[tuple[int, int]] = []
+        parts = []
+        offset = 0
+        for text in texts:
+            parts.append(text)
+            offsets.append((offset, offset + len(text)))
+            offset += len(text) + len(separator)
+
+        combined = separator.join(parts)
+        combined_results = self._analyze_pii(combined)
+        sanitized = []
+        for text, (start, end) in zip(texts, offsets):
+            local_results = []
+            for result in combined_results:
+                if result.start < start or result.end > end:
+                    continue
+                local_result = copy(result)
+                local_result.start -= start
+                local_result.end -= start
+                local_results.append(local_result)
+            sanitized.append(self._anonymize_pii(text, local_results))
+        return sanitized
+
     def sanitize(self, text: str) -> str:
         return self._redact_pii(self._redact_secrets(text))
+
+    def sanitize_many(self, texts: list[str]) -> list[str]:
+        secret_safe = [self._redact_secrets(text) for text in texts]
+        return self._redact_pii_many(secret_safe)
 
 
 DEFAULT_CUSTOM_FIELDS = {
@@ -257,18 +299,30 @@ class OutputPolicy:
             return {"status": "error", "error": "YouTrack request failed"}
         return getattr(self, f"_{policy}")(payload)
 
+    def _prepare_text(self, value: str) -> str:
+        return re.sub(
+            r"(?<!\w)@([A-Za-z0-9][A-Za-z0-9._-]{1,63})",
+            lambda match: (
+                "@" + (self._pseudonymizer.alias(match.group(1)) or "USER")
+                if self._profile == "diagnostic"
+                else "[USER]"
+            ),
+            value,
+        )
+
+    def _texts(self, values: list[str]) -> list[str]:
+        prepared = [self._prepare_text(value) for value in values]
+        sanitize_many = getattr(self._text_sanitizer, "sanitize_many", None)
+        if callable(sanitize_many):
+            sanitized = sanitize_many(prepared)
+            if len(sanitized) != len(prepared):
+                raise ValueError("batch sanitizer returned an invalid result length")
+            return sanitized
+        return [self._text_sanitizer.sanitize(value) for value in prepared]
+
     def _text(self, value: Any) -> Any:
         if isinstance(value, str):
-            value = re.sub(
-                r"(?<!\w)@([A-Za-z0-9][A-Za-z0-9._-]{1,63})",
-                lambda match: (
-                    "@" + (self._pseudonymizer.alias(match.group(1)) or "USER")
-                    if self._profile == "diagnostic"
-                    else "[USER]"
-                ),
-                value,
-            )
-            return self._text_sanitizer.sanitize(value)
+            return self._texts([value])[0]
         if isinstance(value, list):
             return [self._text(item) for item in value]
         if isinstance(value, dict):
@@ -386,6 +440,7 @@ class OutputPolicy:
         if not isinstance(payload, list):
             raise PolicyViolation("comments payload must be a list")
         safe = []
+        text_targets: list[tuple[dict[str, Any], str]] = []
         for comment in payload:
             if not isinstance(comment, dict):
                 raise PolicyViolation("comment payload must be an object")
@@ -393,11 +448,18 @@ class OutputPolicy:
                 key: comment[key] for key in ("created", "updated") if key in comment
             }
             if "text" in comment:
-                item["text"] = self._text(comment["text"])
+                if isinstance(comment["text"], str):
+                    text_targets.append((item, comment["text"]))
+                else:
+                    item["text"] = self._text(comment["text"])
             author = self._identity(comment.get("author"))
             if author:
                 item["author"] = author
             safe.append(item)
+
+        sanitized_texts = self._texts([text for _, text in text_targets])
+        for (item, _), text in zip(text_targets, sanitized_texts):
+            item["text"] = text
         return safe
 
     def _links(self, payload: Any) -> Any:
