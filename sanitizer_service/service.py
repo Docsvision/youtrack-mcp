@@ -106,6 +106,9 @@ class PresidioAndSecretsSanitizer:
         self._scan_line = scan_line
         self._secret_settings = default_settings
         self._score_threshold = float(os.getenv("SANITIZER_PII_SCORE_THRESHOLD", "0.4"))
+        self._batch_max_chars = max(
+            1, int(os.getenv("SANITIZER_PII_BATCH_MAX_CHARS", "4000"))
+        )
 
     def _redact_secrets(self, text: str) -> str:
         values: set[str] = set()
@@ -164,11 +167,8 @@ class PresidioAndSecretsSanitizer:
     def _redact_pii(self, text: str) -> str:
         return self._anonymize_pii(text, self._analyze_pii(text))
 
-    def _redact_pii_many(self, texts: list[str]) -> list[str]:
-        """Analyze a collection with two NLP passes instead of two per item."""
-        if not texts:
-            return []
-
+    def _redact_pii_batch(self, texts: list[str]) -> list[str]:
+        """Analyze one size-bounded collection with two NLP passes."""
         separator = "\n\n"
         offsets: list[tuple[int, int]] = []
         parts = []
@@ -191,6 +191,32 @@ class PresidioAndSecretsSanitizer:
                 local_result.end -= start
                 local_results.append(local_result)
             sanitized.append(self._anonymize_pii(text, local_results))
+        return sanitized
+
+    def _redact_pii_many(self, texts: list[str]) -> list[str]:
+        """Analyze a collection in bounded batches to avoid nonlinear NLP cost."""
+        if not texts:
+            return []
+
+        separator_length = 2
+        max_chars = getattr(self, "_batch_max_chars", 4000)
+        sanitized: list[str] = []
+        batch: list[str] = []
+        batch_chars = 0
+
+        for text in texts:
+            added_chars = len(text) + (separator_length if batch else 0)
+            if batch and batch_chars + added_chars > max_chars:
+                sanitized.extend(self._redact_pii_batch(batch))
+                batch = []
+                batch_chars = 0
+                added_chars = len(text)
+
+            batch.append(text)
+            batch_chars += added_chars
+
+        if batch:
+            sanitized.extend(self._redact_pii_batch(batch))
         return sanitized
 
     def sanitize(self, text: str) -> str:

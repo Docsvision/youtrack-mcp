@@ -110,6 +110,37 @@ def test_presidio_batch_runs_only_two_language_analyses():
     assert [call[1] for call in sanitizer._analyzer.calls] == ["ru", "en"]
 
 
+def test_presidio_batch_limits_combined_document_size():
+    class RecordingAnalyzer:
+        def __init__(self):
+            self.calls = []
+
+        def analyze(self, *, text, language, score_threshold):
+            self.calls.append((text, language, score_threshold))
+            return []
+
+    sanitizer = PresidioAndSecretsSanitizer.__new__(PresidioAndSecretsSanitizer)
+    sanitizer._analyzer = RecordingAnalyzer()
+    sanitizer._score_threshold = 0.4
+    sanitizer._batch_max_chars = 25
+    sanitizer._redact_secrets = lambda text: text
+
+    texts = [str(index) * 10 for index in range(5)]
+    result = sanitizer.sanitize_many(texts)
+
+    assert result == texts
+    assert len(sanitizer._analyzer.calls) == 6
+    assert all(len(call[0]) <= 25 for call in sanitizer._analyzer.calls)
+    assert [call[1] for call in sanitizer._analyzer.calls] == [
+        "ru",
+        "en",
+        "ru",
+        "en",
+        "ru",
+        "en",
+    ]
+
+
 def test_resource_envelope_is_sanitized_and_uri_is_removed(policy):
     result = policy.sanitize(
         "get_issue",

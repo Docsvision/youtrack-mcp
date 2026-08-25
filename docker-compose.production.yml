@@ -90,7 +90,7 @@ services:
       MCP_SERVER_NAME: youtrack-mcp-sanitized
       MCP_SERVER_DESCRIPTION: Read-only YouTrack MCP with mandatory output sanitization
       YOUTRACK_SANITIZER_URL: http://sanitizer:8090/sanitize
-      YOUTRACK_SANITIZER_TIMEOUT: "30"
+      YOUTRACK_SANITIZER_TIMEOUT: "120"
       YOUTRACK_SANITIZER_FAIL_CLOSED: "true"
       YOUTRACK_SANITIZER_REQUIRED: "true"
       YOUTRACK_COMPANY_SANITIZATION: "true"
