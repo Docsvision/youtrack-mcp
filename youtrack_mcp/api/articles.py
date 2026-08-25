@@ -1,4 +1,3 @@
-
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
@@ -10,10 +9,12 @@ class Article(BaseModel):
     """Model for a YouTrack Knowledge Base Article."""
 
     id: str
+    idReadable: Optional[str] = None
     summary: Optional[str] = None
     content: Optional[str] = None
+    created: Optional[int] = None
     updated: Optional[int] = None
-    space: Optional[Dict[str, Any]] = None
+    project: Optional[Dict[str, Any]] = None
 
     model_config = {
         "extra": "allow",
@@ -66,24 +67,27 @@ class ArticlesClient:
         Returns:
             Article model
         """
-        fields_query = fields or "id,summary,content,updated,space(id,name)"
-        response = self.client.get(f"articles/{article_id}?fields={fields_query}")
+        fields_query = fields or (
+            "id,idReadable,summary,content,created,updated,"
+            "project(id,name,shortName)"
+        )
+        response = self.client.get(
+            f"articles/{article_id}", params={"fields": fields_query}
+        )
         return Article.model_validate(response)
 
     def list_articles(
         self,
-        space_id: Optional[str] = None,
-        query: Optional[str] = None,
+        project_id: Optional[str] = None,
         fields: Optional[str] = None,
         top: int = 20,
         skip: int = 0,
     ) -> List[Article]:
         """
-        List articles with optional filtering by space and query.
+        List articles, optionally restricted to one YouTrack project.
 
         Args:
-            space_id: Optional Knowledge Base space id to filter on
-            query: Optional search query (e.g., keywords)
+            project_id: Optional YouTrack project database ID
             fields: Optional fields selection string
             top: Max number of results to return
             skip: Offset for pagination
@@ -94,19 +98,12 @@ class ArticlesClient:
         params: Dict[str, Any] = {
             "$top": top,
             "$skip": skip,
-            "fields": fields or "id,summary,updated,space(id,name)",
+            "fields": fields
+            or "id,idReadable,summary,updated,project(id,name,shortName)",
         }
 
-        # Build query: combine space filter and user query if both provided
-        combined_query_parts: List[str] = []
-        if space_id:
-            combined_query_parts.append(f"space:{space_id}")
-        if query:
-            combined_query_parts.append(query)
-        if combined_query_parts:
-            params["query"] = " ".join(combined_query_parts)
-
-        response = self.client.get("articles", params=params)
+        endpoint = f"admin/projects/{project_id}/articles" if project_id else "articles"
+        response = self.client.get(endpoint, params=params)
 
         # API may return list[dict]
         return [Article.model_validate(item) for item in response]
@@ -117,17 +114,72 @@ class ArticlesClient:
         fields: Optional[str] = None,
         top: int = 20,
         skip: int = 0,
+        project_id: Optional[str] = None,
     ) -> List[Article]:
         """
-        Search articles by query.
+        Search accessible article titles and content locally.
+
+        The public YouTrack ``/api/articles`` collection has no search parameter,
+        so the server pages through the REST collection and applies a Unicode-aware,
+        case-insensitive word match. Pagination is applied to matching articles.
         """
-        return self.list_articles(
-            space_id=None,
-            query=query,
-            fields=fields,
-            top=top,
-            skip=skip,
+        terms = [term for term in query.casefold().split() if term]
+        if not terms or top <= 0 or skip < 0:
+            return []
+
+        requested_fields = (
+            fields or "id,idReadable,summary,updated,project(id,name,shortName)"
         )
+        search_fields = (
+            "id,idReadable,summary,content,created,updated,"
+            "project(id,name,shortName)"
+        )
+        endpoint = f"admin/projects/{project_id}/articles" if project_id else "articles"
+        page_size = 42
+        api_skip = 0
+        matching: List[Article] = []
+
+        while len(matching) < skip + top:
+            response = self.client.get(
+                endpoint,
+                params={
+                    "$top": page_size,
+                    "$skip": api_skip,
+                    "fields": search_fields,
+                },
+            )
+            page = [Article.model_validate(item) for item in response]
+            if not page:
+                break
+
+            for article in page:
+                project = article.project or {}
+                haystack = "\n".join(
+                    str(value)
+                    for value in (
+                        article.idReadable,
+                        article.summary,
+                        article.content,
+                        project.get("name"),
+                        project.get("shortName"),
+                    )
+                    if value
+                ).casefold()
+                if all(term in haystack for term in terms):
+                    matching.append(article)
+                    if len(matching) >= skip + top:
+                        break
+
+            api_skip += len(page)
+            if len(page) < page_size:
+                break
+
+        include_content = "content" in requested_fields
+        result = matching[skip : skip + top]
+        if not include_content:
+            for article in result:
+                article.content = None
+        return result
 
     def search_articles_filtered(
         self,
@@ -308,9 +360,7 @@ class ArticlesClient:
         response = self.client.post_multipart(endpoint, files=files)
         return Attachment.model_validate(response)
 
-    def download_article_attachment(
-        self, article_id: str, attachment_id: str
-    ) -> bytes:
+    def download_article_attachment(self, article_id: str, attachment_id: str) -> bytes:
         endpoint = f"articles/{article_id}/attachments/{attachment_id}/content"
         return self.client.get_bytes(
             endpoint, headers={"Accept": "application/octet-stream"}

@@ -44,9 +44,7 @@ class TestYouTrackClient:
     @pytest.fixture
     def mock_session(self):
         """Mock requests session."""
-        with patch(
-            "youtrack_mcp.api.client.requests.Session"
-        ) as mock_session_class:
+        with patch("youtrack_mcp.api.client.requests.Session") as mock_session_class:
             session = Mock()
             mock_session_class.return_value = session
             yield session
@@ -55,9 +53,7 @@ class TestYouTrackClient:
     def client(self, mock_session):
         """Create a test client with mocked session."""
         with patch("youtrack_mcp.api.client.config") as mock_config:
-            mock_config.get_base_url.return_value = (
-                "https://test.youtrack.cloud"
-            )
+            mock_config.get_base_url.return_value = "https://test.youtrack.cloud"
             mock_config.YOUTRACK_API_TOKEN = "test-token"
             mock_config.VERIFY_SSL = True
             mock_config.is_cloud_instance.return_value = True
@@ -67,9 +63,7 @@ class TestYouTrackClient:
     def test_client_initialization_default(self, mock_session):
         """Test client initialization with default configuration."""
         with patch("youtrack_mcp.api.client.config") as mock_config:
-            mock_config.get_base_url.return_value = (
-                "https://test.youtrack.cloud"
-            )
+            mock_config.get_base_url.return_value = "https://test.youtrack.cloud"
             mock_config.get_api_token.return_value = "test-token"
             mock_config.VERIFY_SSL = True
             mock_config.is_cloud_instance.return_value = True
@@ -103,12 +97,8 @@ class TestYouTrackClient:
     def test_client_initialization_no_token(self, mock_session):
         """Test that client raises error when no API token is provided."""
         with patch("youtrack_mcp.api.client.config") as mock_config:
-            mock_config.get_base_url.return_value = (
-                "https://test.youtrack.cloud"
-            )
-            mock_config.get_api_token.side_effect = ValueError(
-                "API token is required"
-            )
+            mock_config.get_base_url.return_value = "https://test.youtrack.cloud"
+            mock_config.get_api_token.side_effect = ValueError("API token is required")
 
             with pytest.raises(ValueError, match="API token is required"):
                 YouTrackClient()
@@ -137,6 +127,19 @@ class TestYouTrackClient:
 
         result = client._handle_response(response)
         assert result == {"test": "data"}
+
+    @pytest.mark.unit
+    def test_handle_response_decodes_cyrillic_json_bytes_as_utf8(self, client):
+        response = Mock()
+        response.status_code = 200
+        response.content = '{"summary":"Настройка базы знаний"}'.encode("utf-8")
+        response.encoding = "ISO-8859-1"
+        response.json.return_value = {"summary": "���������"}
+
+        result = client._handle_response(response)
+
+        assert result == {"summary": "Настройка базы знаний"}
+        response.json.assert_not_called()
 
     @pytest.mark.unit
     def test_handle_response_success_empty(self, client):
@@ -419,9 +422,7 @@ class TestYouTrackClient:
     def test_ssl_verification_disabled(self, mock_session):
         """Test SSL verification disabled."""
         with patch("youtrack_mcp.api.client.config") as mock_config:
-            mock_config.get_base_url.return_value = (
-                "https://test.youtrack.cloud"
-            )
+            mock_config.get_base_url.return_value = "https://test.youtrack.cloud"
             mock_config.YOUTRACK_API_TOKEN = "test-token"
             mock_config.VERIFY_SSL = False
 
@@ -450,9 +451,7 @@ class TestExceptionClasses:
     def test_youtrack_api_error_with_details(self):
         """Test YouTrackAPIError with status code and response."""
         response = Mock()
-        error = YouTrackAPIError(
-            "Test error", status_code=500, response=response
-        )
+        error = YouTrackAPIError("Test error", status_code=500, response=response)
         assert str(error) == "Test error"
         assert error.status_code == 500
         assert error.response is response

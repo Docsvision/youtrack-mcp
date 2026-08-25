@@ -100,9 +100,7 @@ class YouTrackClient:
         """
         self.base_url = base_url or config.get_base_url()
         self.api_token = api_token if api_token else config.get_api_token()
-        self.verify_ssl = (
-            verify_ssl if verify_ssl is not None else config.VERIFY_SSL
-        )
+        self.verify_ssl = verify_ssl if verify_ssl is not None else config.VERIFY_SSL
         self.max_retries = max_retries
         self.retry_delay = retry_delay
 
@@ -147,8 +145,8 @@ class YouTrackClient:
             Full API URL
         """
         # Remove trailing slash from base_url for consistent URL construction
-        base = self.base_url.rstrip('/')
-        
+        base = self.base_url.rstrip("/")
+
         if base.endswith("/api"):
             return f"{base}/{endpoint}"
         else:
@@ -176,16 +174,14 @@ class YouTrackClient:
                 return {}
 
             try:
-                return response.json()
-            except json.JSONDecodeError:
+                return self._parse_json_response(response)
+            except json.JSONDecodeError, UnicodeDecodeError:
                 # Handle non-JSON responses
                 logger.warning(
                     f"Non-JSON response received from API: {response.content[:100]}"
                 )
                 return {
-                    "raw_content": response.content.decode(
-                        "utf-8", errors="replace"
-                    )
+                    "raw_content": response.content.decode("utf-8", errors="replace")
                 }
 
         # Handle error responses
@@ -193,10 +189,10 @@ class YouTrackClient:
 
         # Try to extract error details from response
         try:
-            error_data = response.json()
+            error_data = self._parse_json_response(response)
             if isinstance(error_data, dict) and "error" in error_data:
                 error_message = f"{error_message}: {error_data['error']}"
-        except (json.JSONDecodeError, KeyError):
+        except json.JSONDecodeError, UnicodeDecodeError, KeyError:
             if response.content:
                 error_message = f"{error_message}: {response.content.decode('utf-8', errors='replace')}"
 
@@ -216,9 +212,15 @@ class YouTrackClient:
         else:
             raise YouTrackAPIError(error_message, status_code, response)
 
-    def _make_request(
-        self, method: str, endpoint: str, **kwargs
-    ) -> Dict[str, Any]:
+    @staticmethod
+    def _parse_json_response(response: requests.Response) -> Any:
+        """Parse YouTrack JSON bytes as UTF-8 regardless of a bad charset header."""
+        content = response.content
+        if isinstance(content, (bytes, bytearray)):
+            return json.loads(bytes(content).decode("utf-8-sig"))
+        return response.json()
+
+    def _make_request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
         """
         Make API request with retry logic for transient errors.
 
@@ -240,9 +242,7 @@ class YouTrackClient:
 
         # For debugging purposes, log essential request details
         if "json" in kwargs:
-            logger.debug(
-                f"{method} {url} with JSON: {json.dumps(kwargs['json'])}"
-            )
+            logger.debug(f"{method} {url} with JSON: {json.dumps(kwargs['json'])}")
         elif "data" in kwargs:
             logger.debug(f"{method} {url} with data: {kwargs['data']}")
         else:
@@ -263,9 +263,7 @@ class YouTrackClient:
 
                 # Calculate backoff delay (exponential with jitter)
                 backoff = delay * (2**retries) * (0.5 + 0.5 * random.random())
-                logger.warning(
-                    f"Transient error, retrying in {backoff:.2f}s: {str(e)}"
-                )
+                logger.warning(f"Transient error, retrying in {backoff:.2f}s: {str(e)}")
                 time.sleep(backoff)
             except YouTrackAPIError as e:
                 # Non-transient errors
@@ -281,9 +279,7 @@ class YouTrackClient:
                 raise
             except Exception as e:
                 # Unexpected errors
-                logger.exception(
-                    f"Unexpected error for {method} {url}: {str(e)}"
-                )
+                logger.exception(f"Unexpected error for {method} {url}: {str(e)}")
                 raise YouTrackAPIError(f"Unexpected error: {str(e)}")
 
         # If we got here, we've exceeded retries
@@ -337,9 +333,7 @@ class YouTrackClient:
             # YouTrack API usually expects data as JSON
             return self._make_request("POST", endpoint, json=data, **kwargs)
 
-        return self._make_request(
-            "POST", endpoint, data=data, json=json_data, **kwargs
-        )
+        return self._make_request("POST", endpoint, data=data, json=json_data, **kwargs)
 
     def put(
         self,
@@ -360,9 +354,7 @@ class YouTrackClient:
         Returns:
             Parsed JSON response
         """
-        return self._make_request(
-            "PUT", endpoint, data=data, json=json_data, **kwargs
-        )
+        return self._make_request("PUT", endpoint, data=data, json=json_data, **kwargs)
 
     def delete(self, endpoint: str, **kwargs) -> Dict[str, Any]:
         """

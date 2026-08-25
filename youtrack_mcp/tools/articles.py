@@ -28,7 +28,10 @@ class ArticlesTools:
     def get_article(
         self,
         article_id: str,
-        fields: str = "id,summary,content,updated,space(id,name)",
+        fields: str = (
+            "id,idReadable,summary,content,created,updated,"
+            "project(id,name,shortName)"
+        ),
     ) -> str:
         """Get a single article by id."""
         try:
@@ -36,60 +39,79 @@ class ArticlesTools:
                 return format_json_response({"error": "Article ID is required"})
             article = self.articles_api.get_article(article_id, fields)
             return format_json_response(
-                article.model_dump() if hasattr(article, "model_dump") else article
+                article.model_dump(exclude_none=True)
+                if hasattr(article, "model_dump")
+                else article
             )
         except Exception as e:
             logger.exception(f"Error getting article {article_id}")
-            return format_json_response({"error": "An unexpected error occurred. Check server logs for details."})
+            return format_json_response(
+                {
+                    "error": "An unexpected error occurred. Check server logs for details."
+                }
+            )
 
     @sync_wrapper
     def list_articles(
         self,
-        space_id: Optional[str] = None,
-        query: Optional[str] = None,
-        fields: str = "id,summary,updated,space(id,name)",
+        project_id: Optional[str] = None,
+        fields: str = "id,idReadable,summary,updated,project(id,name,shortName)",
         top: int = 20,
         skip: int = 0,
     ) -> str:
         """List articles with optional filters."""
         try:
             articles = self.articles_api.list_articles(
-                space_id=space_id,
-                query=query,
+                project_id=project_id,
                 fields=fields,
                 top=top,
                 skip=skip,
             )
             result = [
-                a.model_dump() if hasattr(a, "model_dump") else a for a in articles
+                a.model_dump(exclude_none=True) if hasattr(a, "model_dump") else a
+                for a in articles
             ]
             return format_json_response(result)
         except Exception as e:
             logger.exception("Error listing articles")
-            return format_json_response({"error": "An unexpected error occurred. Check server logs for details."})
+            return format_json_response(
+                {
+                    "error": "An unexpected error occurred. Check server logs for details."
+                }
+            )
 
     @sync_wrapper
     def search_articles(
         self,
         query: str,
-        fields: str = "id,summary,updated,space(id,name)",
+        fields: str = "id,idReadable,summary,updated,project(id,name,shortName)",
         top: int = 20,
         skip: int = 0,
+        project_id: Optional[str] = None,
     ) -> str:
         """Search articles by query."""
         try:
             if not query:
                 return format_json_response({"error": "Query is required"})
             articles = self.articles_api.search_articles(
-                query=query, fields=fields, top=top, skip=skip
+                query=query,
+                fields=fields,
+                top=top,
+                skip=skip,
+                project_id=project_id,
             )
             result = [
-                a.model_dump() if hasattr(a, "model_dump") else a for a in articles
+                a.model_dump(exclude_none=True) if hasattr(a, "model_dump") else a
+                for a in articles
             ]
             return format_json_response(result)
         except Exception as e:
             logger.exception("Error searching articles")
-            return format_json_response({"error": "An unexpected error occurred. Check server logs for details."})
+            return format_json_response(
+                {
+                    "error": "An unexpected error occurred. Check server logs for details."
+                }
+            )
 
     @sync_wrapper
     def search_articles_filtered(
@@ -125,7 +147,11 @@ class ArticlesTools:
             return format_json_response(result)
         except Exception as e:
             logger.exception("Error searching filtered articles")
-            return format_json_response({"error": "An unexpected error occurred. Check server logs for details."})
+            return format_json_response(
+                {
+                    "error": "An unexpected error occurred. Check server logs for details."
+                }
+            )
 
     @sync_wrapper
     def create_article(
@@ -160,7 +186,11 @@ class ArticlesTools:
             )
         except Exception as e:
             logger.exception("Error creating article")
-            return format_json_response({"error": "An unexpected error occurred. Check server logs for details."})
+            return format_json_response(
+                {
+                    "error": "An unexpected error occurred. Check server logs for details."
+                }
+            )
 
     @sync_wrapper
     def update_article(
@@ -193,7 +223,11 @@ class ArticlesTools:
             )
         except Exception as e:
             logger.exception("Error updating article")
-            return format_json_response({"error": "An unexpected error occurred. Check server logs for details."})
+            return format_json_response(
+                {
+                    "error": "An unexpected error occurred. Check server logs for details."
+                }
+            )
 
     @sync_wrapper
     def set_article_status(self, article_id: str, status: str) -> str:
@@ -209,7 +243,11 @@ class ArticlesTools:
             )
         except Exception as e:
             logger.exception("Error setting article status")
-            return format_json_response({"error": "An unexpected error occurred. Check server logs for details."})
+            return format_json_response(
+                {
+                    "error": "An unexpected error occurred. Check server logs for details."
+                }
+            )
 
     # === Comments ===
     @sync_wrapper
@@ -226,15 +264,24 @@ class ArticlesTools:
             comments = self.articles_api.list_article_comments(
                 article_id=article_id, fields=fields, top=top, skip=skip
             )
-            result = [c.model_dump() if hasattr(c, "model_dump") else c for c in comments]
+            result = [
+                c.model_dump() if hasattr(c, "model_dump") else c for c in comments
+            ]
             return format_json_response(result)
         except Exception as e:
             logger.exception("Error listing article comments")
-            return format_json_response({"error": "An unexpected error occurred. Check server logs for details."})
+            return format_json_response(
+                {
+                    "error": "An unexpected error occurred. Check server logs for details."
+                }
+            )
 
     @sync_wrapper
     def add_article_comment(
-        self, article_id: str, text: str, fields: str = "id,text,updated,author(login,name)"
+        self,
+        article_id: str,
+        text: str,
+        fields: str = "id,text,updated,author(login,name)",
     ) -> str:
         try:
             if not article_id:
@@ -249,7 +296,11 @@ class ArticlesTools:
             )
         except Exception as e:
             logger.exception("Error adding article comment")
-            return format_json_response({"error": "An unexpected error occurred. Check server logs for details."})
+            return format_json_response(
+                {
+                    "error": "An unexpected error occurred. Check server logs for details."
+                }
+            )
 
     @sync_wrapper
     def update_article_comment(
@@ -274,7 +325,11 @@ class ArticlesTools:
             )
         except Exception as e:
             logger.exception("Error updating article comment")
-            return format_json_response({"error": "An unexpected error occurred. Check server logs for details."})
+            return format_json_response(
+                {
+                    "error": "An unexpected error occurred. Check server logs for details."
+                }
+            )
 
     # === Attachments ===
     @sync_wrapper
@@ -291,11 +346,17 @@ class ArticlesTools:
             attachments = self.articles_api.list_article_attachments(
                 article_id=article_id, fields=fields, top=top, skip=skip
             )
-            result = [a.model_dump() if hasattr(a, "model_dump") else a for a in attachments]
+            result = [
+                a.model_dump() if hasattr(a, "model_dump") else a for a in attachments
+            ]
             return format_json_response(result)
         except Exception as e:
             logger.exception("Error listing article attachments")
-            return format_json_response({"error": "An unexpected error occurred. Check server logs for details."})
+            return format_json_response(
+                {
+                    "error": "An unexpected error occurred. Check server logs for details."
+                }
+            )
 
     @sync_wrapper
     def upload_article_attachment(
@@ -327,11 +388,17 @@ class ArticlesTools:
                 fields=fields,
             )
             return format_json_response(
-                attachment.model_dump() if hasattr(attachment, "model_dump") else attachment
+                attachment.model_dump()
+                if hasattr(attachment, "model_dump")
+                else attachment
             )
         except Exception as e:
             logger.exception("Error uploading article attachment")
-            return format_json_response({"error": "An unexpected error occurred. Check server logs for details."})
+            return format_json_response(
+                {
+                    "error": "An unexpected error occurred. Check server logs for details."
+                }
+            )
 
     @sync_wrapper
     def download_article_attachment(
@@ -351,37 +418,46 @@ class ArticlesTools:
                 article_id=article_id, attachment_id=attachment_id
             )
             if return_base64:
-                return format_json_response({"content_base64": base64.b64encode(data).decode("ascii")})
-            return format_json_response({"content": data.decode("utf-8", errors="replace")})
+                return format_json_response(
+                    {"content_base64": base64.b64encode(data).decode("ascii")}
+                )
+            return format_json_response(
+                {"content": data.decode("utf-8", errors="replace")}
+            )
         except Exception as e:
             logger.exception("Error downloading article attachment")
-            return format_json_response({"error": "An unexpected error occurred. Check server logs for details."})
+            return format_json_response(
+                {
+                    "error": "An unexpected error occurred. Check server logs for details."
+                }
+            )
+
     def get_tool_definitions(self) -> Dict[str, Dict[str, Any]]:
         return {
             "get_article": {
-                "description": 'Get a Knowledge Base article by id. Example: get_article(article_id="1-23")',
+                "description": 'Get a Knowledge Base article by database or readable id. Example: get_article(article_id="DOC-A-12")',
                 "parameter_descriptions": {
-                    "article_id": "Internal article id like '1-23'",
-                    "fields": "Fields to include (default: id,summary,content,updated,space(id,name))",
+                    "article_id": "Database id like '226-0' or readable id like 'DOC-A-12'",
+                    "fields": "Fields to include; content and project are returned by default",
                 },
             },
             "list_articles": {
-                "description": 'List Knowledge Base articles with optional filters. Example: list_articles(space_id="0-1", query="status: published", top=20)',
+                "description": 'List Knowledge Base articles, optionally for one project. Example: list_articles(project_id="0-1", top=20)',
                 "parameter_descriptions": {
-                    "space_id": "Optional space id to filter",
-                    "query": "Optional search query",
-                    "fields": "Fields to include (default: id,summary,updated,space(id,name))",
+                    "project_id": "Optional YouTrack project database id",
+                    "fields": "Fields to include; id, title, update time and project are returned by default",
                     "top": "Max results (default: 20)",
                     "skip": "Offset for pagination (default: 0)",
                 },
             },
             "search_articles": {
-                "description": 'Search Knowledge Base articles by query. Example: search_articles(query="onboarding")',
+                "description": 'Case-insensitive full-text search over accessible Knowledge Base article titles and content. Example: search_articles(query="настройка сервера")',
                 "parameter_descriptions": {
-                    "query": "Search query",
-                    "fields": "Fields to include (default: id,summary,updated,space(id,name))",
+                    "query": "Words to find; every word must occur in the article title, content, id or project",
+                    "fields": "Fields to include; add content to return full matching content",
                     "top": "Max results (default: 20)",
                     "skip": "Offset for pagination (default: 0)",
+                    "project_id": "Optional YouTrack project database id",
                 },
             },
             "search_articles_filtered": {

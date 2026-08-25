@@ -289,6 +289,9 @@ TOOL_POLICIES = {
     "get_projects": "projects",
     "get_all_projects": "projects",
     "get_project": "project",
+    "get_article": "article",
+    "list_articles": "articles",
+    "search_articles": "articles",
 }
 
 
@@ -542,6 +545,59 @@ class OutputPolicy:
         if not isinstance(payload, list):
             raise PolicyViolation("projects payload must be a list")
         return [self._project(item) for item in payload]
+
+    def _article(self, payload: Any) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise PolicyViolation("article payload must be an object")
+
+        safe: dict[str, Any] = {}
+        readable_id = payload.get("idReadable") or payload.get("id")
+        if readable_id is not None:
+            safe["id"] = readable_id
+        for key in ("summary", "content"):
+            if key in payload:
+                safe[key] = self._text(payload[key])
+        for key in ("created", "updated", "created_iso8601", "updated_iso8601"):
+            if key in payload:
+                safe[key] = payload[key]
+
+        project = self._project_value(payload.get("project"))
+        if project:
+            safe["project"] = project
+        return safe
+
+    def _articles(self, payload: Any) -> list[dict[str, Any]]:
+        if not isinstance(payload, list):
+            raise PolicyViolation("articles payload must be a list")
+
+        safe_articles: list[dict[str, Any]] = []
+        text_targets: list[tuple[dict[str, Any], str, str]] = []
+        for article in payload:
+            if not isinstance(article, dict):
+                raise PolicyViolation("article payload must be an object")
+
+            safe: dict[str, Any] = {}
+            readable_id = article.get("idReadable") or article.get("id")
+            if readable_id is not None:
+                safe["id"] = readable_id
+            for key in ("summary", "content"):
+                value = article.get(key)
+                if isinstance(value, str):
+                    text_targets.append((safe, key, value))
+                elif key in article:
+                    safe[key] = self._text(value)
+            for key in ("created", "updated", "created_iso8601", "updated_iso8601"):
+                if key in article:
+                    safe[key] = article[key]
+            project = self._project_value(article.get("project"))
+            if project:
+                safe["project"] = project
+            safe_articles.append(safe)
+
+        sanitized_texts = self._texts([value for _, _, value in text_targets])
+        for (safe, key, _), value in zip(text_targets, sanitized_texts):
+            safe[key] = value
+        return safe_articles
 
 
 class SanitizeRequest(BaseModel):

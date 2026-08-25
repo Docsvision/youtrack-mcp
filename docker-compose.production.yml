@@ -17,7 +17,8 @@ x-mcp-common: &mcp-common
     TRANSPORT: streamable-http
     PORT: "8000"
     YOUTRACK_READ_ONLY: "true"
-    ENABLED_TOOLS: get_issue,search_issues,get_issue_comments,get_issue_links,get_projects
+    YOUTRACK_ENABLE_KB: "true"
+    ENABLED_TOOLS: get_issue,search_issues,get_issue_comments,get_issue_links,get_projects,get_article,list_articles,search_articles
     YOUTRACK_TOKEN_FILE: /run/secrets/youtrack_token
   healthcheck:
     test:

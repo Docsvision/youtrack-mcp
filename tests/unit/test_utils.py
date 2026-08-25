@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from youtrack_mcp.utils import (
     convert_timestamp_to_iso8601,
     add_iso8601_timestamps,
-    format_json_response
+    format_json_response,
 )
 
 
@@ -20,7 +20,7 @@ class TestConvertTimestampToIso8601:
         # Test timestamp: 2023-01-01 00:00:00 UTC in milliseconds
         timestamp_ms = 1672531200000
         result = convert_timestamp_to_iso8601(timestamp_ms)
-        
+
         assert result == "2023-01-01T00:00:00+00:00"
 
     def test_zero_timestamp(self):
@@ -43,7 +43,7 @@ class TestConvertTimestampToIso8601:
     def test_invalid_timestamp_overflow_error(self):
         """Test handling timestamp that causes OverflowError."""
         # Test with extremely large value
-        invalid_timestamp = float('inf')
+        invalid_timestamp = float("inf")
         result = convert_timestamp_to_iso8601(invalid_timestamp)
         assert result == str(invalid_timestamp)
 
@@ -63,7 +63,7 @@ class TestAddIso8601Timestamps:
         """Test adding ISO8601 timestamp to dict with created field."""
         data = {"created": 1672531200000, "name": "test"}
         result = add_iso8601_timestamps(data)
-        
+
         assert result["created"] == 1672531200000
         assert result["created_iso8601"] == "2023-01-01T00:00:00+00:00"
         assert result["name"] == "test"
@@ -72,7 +72,7 @@ class TestAddIso8601Timestamps:
         """Test adding ISO8601 timestamp to dict with updated field."""
         data = {"updated": 1672531200000, "id": "123"}
         result = add_iso8601_timestamps(data)
-        
+
         assert result["updated"] == 1672531200000
         assert result["updated_iso8601"] == "2023-01-01T00:00:00+00:00"
         assert result["id"] == "123"
@@ -82,10 +82,10 @@ class TestAddIso8601Timestamps:
         data = {
             "created": 1672531200000,
             "updated": 1672617600000,  # 2023-01-02 00:00:00 UTC
-            "summary": "Test issue"
+            "summary": "Test issue",
         }
         result = add_iso8601_timestamps(data)
-        
+
         assert result["created_iso8601"] == "2023-01-01T00:00:00+00:00"
         assert result["updated_iso8601"] == "2023-01-02T00:00:00+00:00"
         assert result["summary"] == "Test issue"
@@ -94,7 +94,7 @@ class TestAddIso8601Timestamps:
         """Test dict with non-integer timestamp values."""
         data = {"created": "not-a-number", "updated": None}
         result = add_iso8601_timestamps(data)
-        
+
         # Should not add ISO8601 fields for non-integer values
         assert "created_iso8601" not in result
         assert "updated_iso8601" not in result
@@ -104,17 +104,11 @@ class TestAddIso8601Timestamps:
     def test_nested_dict_with_timestamps(self):
         """Test nested dictionaries with timestamps."""
         data = {
-            "issue": {
-                "created": 1672531200000,
-                "summary": "Test"
-            },
-            "project": {
-                "updated": 1672617600000,
-                "name": "Demo"
-            }
+            "issue": {"created": 1672531200000, "summary": "Test"},
+            "project": {"updated": 1672617600000, "name": "Demo"},
         }
         result = add_iso8601_timestamps(data)
-        
+
         assert result["issue"]["created_iso8601"] == "2023-01-01T00:00:00+00:00"
         assert result["project"]["updated_iso8601"] == "2023-01-02T00:00:00+00:00"
 
@@ -122,10 +116,10 @@ class TestAddIso8601Timestamps:
         """Test list containing dictionaries with timestamps."""
         data = [
             {"created": 1672531200000, "id": "1"},
-            {"updated": 1672617600000, "id": "2"}
+            {"updated": 1672617600000, "id": "2"},
         ]
         result = add_iso8601_timestamps(data)
-        
+
         assert result[0]["created_iso8601"] == "2023-01-01T00:00:00+00:00"
         assert result[1]["updated_iso8601"] == "2023-01-02T00:00:00+00:00"
 
@@ -137,16 +131,22 @@ class TestAddIso8601Timestamps:
                     "created": 1672531200000,
                     "comments": [
                         {"created": 1672617600000, "text": "comment1"},
-                        {"updated": 1672704000000, "text": "comment2"}
-                    ]
+                        {"updated": 1672704000000, "text": "comment2"},
+                    ],
                 }
             ]
         }
         result = add_iso8601_timestamps(data)
-        
+
         assert result["issues"][0]["created_iso8601"] == "2023-01-01T00:00:00+00:00"
-        assert result["issues"][0]["comments"][0]["created_iso8601"] == "2023-01-02T00:00:00+00:00"
-        assert result["issues"][0]["comments"][1]["updated_iso8601"] == "2023-01-03T00:00:00+00:00"
+        assert (
+            result["issues"][0]["comments"][0]["created_iso8601"]
+            == "2023-01-02T00:00:00+00:00"
+        )
+        assert (
+            result["issues"][0]["comments"][1]["updated_iso8601"]
+            == "2023-01-03T00:00:00+00:00"
+        )
 
     def test_non_dict_non_list_data(self):
         """Test with data that is neither dict nor list."""
@@ -178,7 +178,7 @@ class TestAddIso8601Timestamps:
         """Test that original dict is not modified."""
         original_data = {"created": 1672531200000, "name": "test"}
         result = add_iso8601_timestamps(original_data)
-        
+
         # Original should not have ISO8601 field
         assert "created_iso8601" not in original_data
         # Result should have ISO8601 field
@@ -192,7 +192,7 @@ class TestFormatJsonResponse:
         """Test formatting simple dict with timestamp."""
         data = {"created": 1672531200000, "name": "test"}
         result = format_json_response(data)
-        
+
         parsed = json.loads(result)
         assert parsed["created"] == 1672531200000
         assert parsed["created_iso8601"] == "2023-01-01T00:00:00+00:00"
@@ -203,12 +203,12 @@ class TestFormatJsonResponse:
         data = {
             "issues": [
                 {"created": 1672531200000, "id": "1"},
-                {"updated": 1672617600000, "id": "2"}
+                {"updated": 1672617600000, "id": "2"},
             ],
-            "total": 2
+            "total": 2,
         }
         result = format_json_response(data)
-        
+
         parsed = json.loads(result)
         assert parsed["issues"][0]["created_iso8601"] == "2023-01-01T00:00:00+00:00"
         assert parsed["issues"][1]["updated_iso8601"] == "2023-01-02T00:00:00+00:00"
@@ -218,9 +218,15 @@ class TestFormatJsonResponse:
         """Test formatting data without timestamp fields."""
         data = {"name": "test", "id": 123, "active": True}
         result = format_json_response(data)
-        
+
         parsed = json.loads(result)
         assert parsed == data
+
+    def test_cyrillic_is_not_ascii_escaped(self):
+        result = format_json_response({"summary": "Настройка базы знаний"})
+
+        assert "Настройка базы знаний" in result
+        assert "\\u041d" not in result
 
     def test_none_data(self):
         """Test formatting None data."""
@@ -246,7 +252,7 @@ class TestFormatJsonResponse:
         """Test formatting list data."""
         data = [1, 2, {"created": 1672531200000}]
         result = format_json_response(data)
-        
+
         parsed = json.loads(result)
         assert parsed[0] == 1
         assert parsed[1] == 2
@@ -257,7 +263,7 @@ class TestFormatJsonResponse:
         """Test that JSON is properly indented."""
         data = {"key": "value", "nested": {"created": 1672531200000}}
         result = format_json_response(data)
-        
+
         # Should be indented (contains newlines and spaces)
         assert "\n" in result
-        assert "  " in result  # 2-space indentation 
+        assert "  " in result  # 2-space indentation

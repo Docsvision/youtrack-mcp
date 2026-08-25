@@ -63,6 +63,66 @@ def test_comment_policy_drops_author(policy):
     assert result == [{"text": "Contact [PERSON] at [EMAIL_ADDRESS]", "created": 123}]
 
 
+def test_article_policy_keeps_readable_content_and_drops_identity(policy):
+    result = policy.sanitize(
+        "get_article",
+        {
+            "id": "226-0",
+            "idReadable": "DOC-A-1",
+            "summary": "Инструкция Ivan Ivanov",
+            "content": "Напишите на ivan@example.com; token top-secret",
+            "reporter": {"name": "Ivan Ivanov"},
+            "project": {"id": "0-1", "shortName": "DOC", "name": "Документация"},
+            "updated": 123,
+            "visibility": {"permittedUsers": [{"login": "ivan"}]},
+        },
+    )
+
+    assert result == {
+        "id": "DOC-A-1",
+        "summary": "Инструкция [PERSON]",
+        "content": "Напишите на [EMAIL_ADDRESS]; token [SECRET]",
+        "updated": 123,
+        "project": {"shortName": "DOC", "name": "Документация"},
+    }
+
+
+def test_article_search_policy_sanitizes_each_result(policy):
+    result = policy.sanitize(
+        "search_articles",
+        [
+            {
+                "idReadable": "DOC-A-2",
+                "summary": "Кодировка UTF-8",
+                "content": "Контакт Ivan Ivanov",
+            }
+        ],
+    )
+
+    assert result == [
+        {
+            "id": "DOC-A-2",
+            "summary": "Кодировка UTF-8",
+            "content": "Контакт [PERSON]",
+        }
+    ]
+
+
+def test_article_id_is_not_changed_by_text_sanitization():
+    class LocationSanitizer:
+        def sanitize(self, text: str) -> str:
+            return text.replace("LOC", "[LOCATION]")
+
+    location_policy = OutputPolicy(LocationSanitizer(), profile="strict")
+    result = location_policy.sanitize(
+        "get_article",
+        {"idReadable": "LOC-A-12", "summary": "LOC guide"},
+    )
+
+    assert result["id"] == "LOC-A-12"
+    assert result["summary"] == "[LOCATION] guide"
+
+
 def test_comment_policy_batches_text_sanitization():
     class BatchTextSanitizer:
         def __init__(self):
