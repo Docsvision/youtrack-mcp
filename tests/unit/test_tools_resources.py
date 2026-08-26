@@ -248,6 +248,7 @@ class TestResourcesToolsReadResource:
         assert "customFields(" in request_path
         assert "reporter(" in request_path
         assert "tags(name)" in request_path
+        assert "attachments(id,name,mimeType,size)" in request_path
 
         result_data = json.loads(result)
         content = result_data["contents"][0]
@@ -859,4 +860,4 @@ class TestResourcesToolsGetToolDefinitions:
         # Check structure of a definition
         list_def = definitions["list_resources"]
         assert "description" in list_def
-        assert "parameter_descriptions" in list_def 
+        assert "parameter_descriptions" in list_def

@@ -68,7 +68,7 @@ class TestUtilities:
         diagnostics = ["diagnose_workflow_restrictions", "get_help"]
         custom_fields = ["update_custom_fields", "batch_update_custom_fields", "get_custom_fields", "validate_custom_field", "get_available_custom_field_values"]
         linking = ["link_issues", "get_issue_links", "get_available_link_types", "add_dependency", "remove_dependency", "add_relates_link", "add_duplicate_link"]
-        attachments = ["get_issue_raw", "get_attachment_content"]
+        attachments = ["get_issue_raw", "get_attachment_content", "get_issue_image", "delete_attachment"]
 
         all_expected = basic_ops + dedicated_updates + diagnostics + custom_fields + linking + attachments
 
@@ -109,7 +109,7 @@ class TestUtilities:
         get_attachment = result["get_attachment_content"]
         assert "issue_id" in get_attachment["parameter_descriptions"]
         assert "attachment_id" in get_attachment["parameter_descriptions"]
-        assert "10MB" in get_attachment["description"]  # Updated size limit
+        assert "5MB" in get_attachment["description"]
 
     def test_get_tool_definitions_real_integration(self):
         """Test actual get_tool_definitions integration with real modules."""
@@ -214,4 +214,4 @@ class TestUtilities:
         
         # Should not raise exception
         self.utilities.close()
-        client_with_error.close.assert_called_once() 
+        client_with_error.close.assert_called_once()

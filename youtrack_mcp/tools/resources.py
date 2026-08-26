@@ -519,6 +519,7 @@ class ResourcesTools:
                 "updater(id,login,name,fullName),"
                 "customFields(id,name,value("
                 "$type,id,name,text,presentation,login,fullName)),"
+                "attachments(id,name,mimeType,size),"
                 "tags(name)"
             )
             issue_data = self.client.get(f"issues/{issue_id}?fields={fields}")

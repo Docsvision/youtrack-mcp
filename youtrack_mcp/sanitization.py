@@ -139,8 +139,9 @@ class OutputSanitizationBoundary:
         payload = self._decode_resource_text(payload)
 
         try:
-            for preprocessor in self._preprocessors:
-                payload = preprocessor.redact(payload)
+            if tool_name != "get_issue_image":
+                for preprocessor in self._preprocessors:
+                    payload = preprocessor.redact(payload)
             sanitized = self._sanitizer.sanitize(tool_name, payload)
         except Exception as exc:
             logger.error("Output sanitization failed for tool '%s'", tool_name)

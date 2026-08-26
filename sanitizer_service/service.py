@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -227,18 +228,6 @@ class PresidioAndSecretsSanitizer:
         return self._redact_pii_many(secret_safe)
 
 
-DEFAULT_CUSTOM_FIELDS = {
-    "State",
-    "Priority",
-    "Type",
-    "Subsystem",
-    "Fix versions",
-    "Affected versions",
-    "Estimation",
-    "Assignee",
-}
-
-
 class Pseudonymizer:
     """Create non-reversible aliases, stable for a configured deployment key."""
 
@@ -281,6 +270,7 @@ class Pseudonymizer:
 
 TOOL_POLICIES = {
     "get_issue": "issue",
+    "get_issue_image": "issue_image",
     "search_issues": "issues",
     "get_project_issues": "issues",
     "get_all_issues": "issues",
@@ -311,12 +301,17 @@ class OutputPolicy:
         if self._profile not in {"strict", "diagnostic"}:
             raise ValueError("SANITIZER_PROFILE must be 'strict' or 'diagnostic'")
         self._pseudonymizer = pseudonymizer or Pseudonymizer()
-        configured_fields = os.getenv("SANITIZER_ALLOWED_CUSTOM_FIELDS", "")
+        configured_fields = os.getenv("SANITIZER_ALLOWED_CUSTOM_FIELDS", "").strip()
         self._custom_fields = (
             {item.strip() for item in configured_fields.split(",") if item.strip()}
-            if configured_fields
-            else DEFAULT_CUSTOM_FIELDS
+            if configured_fields and configured_fields != "*"
+            else None
         )
+        self._image_projects = {
+            name.strip().upper()
+            for name in os.getenv("SANITIZER_ALLOWED_IMAGE_PROJECTS", "").split(",")
+            if name.strip()
+        }
 
     def sanitize(self, tool_name: str, payload: Any) -> Any:
         policy = TOOL_POLICIES.get(tool_name)
@@ -445,20 +440,112 @@ class OutputPolicy:
         for field in payload.get("customFields") or payload.get("custom_fields") or []:
             if (
                 not isinstance(field, dict)
-                or field.get("name") not in self._custom_fields
+                or not field.get("name")
+                or (
+                    self._custom_fields is not None
+                    and field["name"] not in self._custom_fields
+                )
             ):
                 continue
+            field_type = str(field.get("$type", ""))
             custom_fields.append(
                 {
                     "name": field["name"],
                     "value": self._custom_field_value(
-                        field.get("value"), identity=field["name"] == "Assignee"
+                        field.get("value"),
+                        identity=(
+                            field["name"] == "Assignee"
+                            or "UserIssueCustomField" in field_type
+                        ),
                     ),
                 }
             )
         if custom_fields:
             safe["customFields"] = custom_fields
+        project_short_name = str(
+            (payload.get("project") or {}).get("shortName", "")
+            if isinstance(payload.get("project"), dict)
+            else ""
+        ).upper()
+        if project_short_name in self._image_projects:
+            attachments = []
+            for attachment in payload.get("attachments") or []:
+                if not isinstance(attachment, dict):
+                    continue
+                mime_type = str(attachment.get("mimeType", "")).lower()
+                if mime_type not in {
+                    "image/png",
+                    "image/jpeg",
+                    "image/gif",
+                    "image/webp",
+                    "image/bmp",
+                }:
+                    continue
+                attachments.append(
+                    {
+                        key: (
+                            self._text(attachment[key])
+                            if key == "name"
+                            else attachment[key]
+                        )
+                        for key in ("id", "name", "mimeType", "size")
+                        if key in attachment
+                    }
+                )
+            if attachments:
+                safe["attachments"] = attachments
         return safe
+
+    def _issue_image(self, payload: Any) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise PolicyViolation("image payload must be an object")
+
+        project = str(payload.get("project", "")).upper()
+        if project not in self._image_projects:
+            raise PolicyViolation("image project is not allowlisted")
+
+        mime_type = str(payload.get("mime_type", "")).lower()
+        content = payload.get("content")
+        if mime_type not in {
+            "image/png",
+            "image/jpeg",
+            "image/gif",
+            "image/webp",
+            "image/bmp",
+        } or not isinstance(content, str):
+            raise PolicyViolation("attachment is not an allowed raster image")
+
+        try:
+            image_bytes = base64.b64decode(content, validate=True)
+        except (ValueError, TypeError) as exc:
+            raise PolicyViolation("image content is not valid base64") from exc
+        if len(image_bytes) > 5 * 1024 * 1024:
+            raise PolicyViolation("image exceeds the maximum allowed size")
+
+        signatures = {
+            "image/png": image_bytes.startswith(b"\x89PNG\r\n\x1a\n"),
+            "image/jpeg": image_bytes.startswith(b"\xff\xd8\xff"),
+            "image/gif": image_bytes.startswith((b"GIF87a", b"GIF89a")),
+            "image/webp": (
+                len(image_bytes) >= 12
+                and image_bytes.startswith(b"RIFF")
+                and image_bytes[8:12] == b"WEBP"
+            ),
+            "image/bmp": image_bytes.startswith(b"BM"),
+        }
+        if not signatures[mime_type]:
+            raise PolicyViolation("image content does not match its MIME type")
+
+        return {
+            "issue_id": payload.get("issue_id"),
+            "project": project,
+            "attachment_id": payload.get("attachment_id"),
+            "filename": self._text(payload.get("filename")),
+            "mime_type": mime_type,
+            "size_bytes": len(image_bytes),
+            "content": content,
+            "status": "success",
+        }
 
     def _issues(self, payload: Any) -> list[dict[str, Any]]:
         if not isinstance(payload, list):

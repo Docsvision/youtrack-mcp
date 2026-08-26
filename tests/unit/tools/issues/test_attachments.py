@@ -360,13 +360,102 @@ class TestAttachments:
         assert result_data["filename"] == "empty.txt"
         assert result_data["status"] == "success"
 
+    def test_get_issue_image_allows_gbl_raster_image(self, monkeypatch):
+        monkeypatch.setattr("youtrack_mcp.config.Config.ALLOWED_IMAGE_PROJECTS", "GBL")
+        issue_id = "GBL-4649"
+        attachment_id = "1-456"
+        content = b"\x89PNG\r\n\x1a\nimage-data"
+        self.mock_client.get.return_value = {
+            "idReadable": issue_id,
+            "project": {"shortName": "GBL"},
+            "attachments": [
+                {
+                    "id": attachment_id,
+                    "name": "screenshot.png",
+                    "mimeType": "image/png",
+                    "size": len(content),
+                }
+            ],
+        }
+        self.mock_issues_api.get_attachment_content.return_value = content
+
+        result = json.loads(self.attachments.get_issue_image(issue_id, attachment_id))
+
+        assert result == {
+            "issue_id": issue_id,
+            "project": "GBL",
+            "attachment_id": attachment_id,
+            "filename": "screenshot.png",
+            "mime_type": "image/png",
+            "size_bytes": len(content),
+            "content": base64.b64encode(content).decode("ascii"),
+            "status": "success",
+        }
+        self.mock_issues_api.get_attachment_content.assert_called_once_with(issue_id, attachment_id)
+
+    def test_get_issue_image_rejects_other_projects_before_download(self, monkeypatch):
+        monkeypatch.setattr("youtrack_mcp.config.Config.ALLOWED_IMAGE_PROJECTS", "GBL")
+        self.mock_client.get.return_value = {
+            "idReadable": "SUP-1",
+            "project": {"shortName": "SUP"},
+            "attachments": [],
+        }
+
+        result = json.loads(self.attachments.get_issue_image("SUP-1", "1-1"))
+
+        assert result["status"] == "error"
+        assert "not enabled" in result["error"]
+        self.mock_issues_api.get_attachment_content.assert_not_called()
+
+    def test_get_issue_image_rejects_non_image_before_download(self, monkeypatch):
+        monkeypatch.setattr("youtrack_mcp.config.Config.ALLOWED_IMAGE_PROJECTS", "GBL")
+        self.mock_client.get.return_value = {
+            "idReadable": "GBL-1",
+            "project": {"shortName": "GBL"},
+            "attachments": [
+                {
+                    "id": "1-1",
+                    "name": "document.pdf",
+                    "mimeType": "application/pdf",
+                    "size": 100,
+                }
+            ],
+        }
+
+        result = json.loads(self.attachments.get_issue_image("GBL-1", "1-1"))
+
+        assert result["status"] == "error"
+        assert "not an allowed raster image" in result["error"]
+        self.mock_issues_api.get_attachment_content.assert_not_called()
+
+    def test_get_issue_image_rejects_spoofed_mime_type(self, monkeypatch):
+        monkeypatch.setattr("youtrack_mcp.config.Config.ALLOWED_IMAGE_PROJECTS", "GBL")
+        self.mock_client.get.return_value = {
+            "idReadable": "GBL-1",
+            "project": {"shortName": "GBL"},
+            "attachments": [
+                {
+                    "id": "1-1",
+                    "name": "fake.png",
+                    "mimeType": "image/png",
+                    "size": 8,
+                }
+            ],
+        }
+        self.mock_issues_api.get_attachment_content.return_value = b"not-png"
+
+        result = json.loads(self.attachments.get_issue_image("GBL-1", "1-1"))
+
+        assert result["status"] == "error"
+        assert "does not match" in result["error"]
+
     def test_get_tool_definitions(self):
         """Test tool definitions for attachment functions."""
         # Act
         definitions = self.attachments.get_tool_definitions()
         
         # Assert
-        expected_functions = ["get_issue_raw", "get_attachment_content"]
+        expected_functions = ["get_issue_raw", "get_attachment_content", "get_issue_image"]
         
         for func_name in expected_functions:
             assert func_name in definitions
@@ -383,7 +472,7 @@ class TestAttachments:
         assert "issue_id" in attachment_def["parameter_descriptions"]
         assert "attachment_id" in attachment_def["parameter_descriptions"]
         assert "base64" in attachment_def["description"].lower()
-        assert "10mb" in attachment_def["description"].lower()
+        assert "5mb" in attachment_def["description"].lower()
 
     def test_get_attachment_content_with_special_characters_filename(self):
         """Test attachment content with special characters in filename."""
@@ -434,4 +523,4 @@ class TestAttachments:
         result_data = json.loads(result)  # This will raise if invalid JSON
         assert isinstance(result_data, dict)
         assert "content" in result_data
-        assert "status" in result_data 
+        assert "status" in result_data

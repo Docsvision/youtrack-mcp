@@ -118,3 +118,22 @@ def test_every_bound_tool_uses_the_central_boundary(monkeypatch):
 
     assert result == {"safe": True}
     assert backend.calls == [("get_issue", {"id": "DEMO-1", "reporter": "Ivan Ivanov"})]
+
+
+@pytest.mark.unit
+def test_image_content_bypasses_text_preprocessors():
+    class CorruptingPreprocessor:
+        def redact(self, payload):
+            return {"content": "corrupted"}
+
+    backend = RecordingSanitizer({"content": "unchanged"})
+    boundary = OutputSanitizationBoundary(
+        backend,
+        preprocessors=(CorruptingPreprocessor(),),
+    )
+    payload = {"content": "base64-data", "project": "GBL"}
+
+    result = boundary.sanitize("get_issue_image", payload)
+
+    assert result == {"content": "unchanged"}
+    assert backend.calls == [("get_issue_image", payload)]

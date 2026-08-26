@@ -181,6 +181,10 @@ class IssueTools:
         """Get attachment content as base64."""
         return self.attachments.get_attachment_content(issue_id, attachment_id)
 
+    def get_issue_image(self, issue_id: str, attachment_id: str) -> str:
+        """Get an allowed raster image attachment."""
+        return self.attachments.get_issue_image(issue_id, attachment_id)
+
     def delete_attachment(self, issue_id: str, attachment_id: str) -> str:
         """Delete an attachment from an issue."""
         return self.attachments.delete_attachment(issue_id, attachment_id)
@@ -205,4 +209,4 @@ __all__ = [
     "Linking",
     "Attachments",
     "Utilities",
-] 
+]

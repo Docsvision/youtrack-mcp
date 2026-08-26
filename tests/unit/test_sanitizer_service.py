@@ -1,5 +1,7 @@
 """Unit tests for structural output policies without loading NLP models."""
 
+import base64
+
 import pytest
 
 from sanitizer_service.service import (
@@ -23,7 +25,7 @@ def policy():
     return OutputPolicy(FakeTextSanitizer(), profile="strict")
 
 
-def test_issue_policy_drops_identity_and_unknown_fields(policy):
+def test_issue_policy_drops_identity_and_unknown_top_level_fields(policy):
     result = policy.sanitize(
         "get_issue",
         {
@@ -35,7 +37,8 @@ def test_issue_policy_drops_identity_and_unknown_fields(policy):
             "internalUrl": "https://internal.example/DEMO-1",
             "customFields": [
                 {"name": "Priority", "value": {"name": "Major", "id": "1-1"}},
-                {"name": "Customer", "value": "Secret Corp"},
+                {"name": "Customer", "value": "Ivan Ivanov"},
+                {"name": "Ivan Ivanov field", "value": "safe"},
             ],
         },
     )
@@ -44,8 +47,29 @@ def test_issue_policy_drops_identity_and_unknown_fields(policy):
         "id": "DEMO-1",
         "summary": "[PERSON] reported a problem",
         "description": "Email [EMAIL_ADDRESS], token [SECRET]",
-        "customFields": [{"name": "Priority", "value": {"name": "Major"}}],
+        "customFields": [
+            {"name": "Priority", "value": {"name": "Major"}},
+            {"name": "Customer", "value": "[PERSON]"},
+            {"name": "Ivan Ivanov field", "value": "safe"},
+        ],
     }
+
+
+def test_issue_policy_can_restrict_custom_fields(monkeypatch):
+    monkeypatch.setenv("SANITIZER_ALLOWED_CUSTOM_FIELDS", "State,Priority")
+    restricted_policy = OutputPolicy(FakeTextSanitizer(), profile="strict")
+
+    result = restricted_policy.sanitize(
+        "get_issue",
+        {
+            "customFields": [
+                {"name": "State", "value": {"name": "Open"}},
+                {"name": "Customer", "value": "Secret Corp"},
+            ]
+        },
+    )
+
+    assert result == {"customFields": [{"name": "State", "value": {"name": "Open"}}]}
 
 
 def test_comment_policy_drops_author(policy):
@@ -223,6 +247,56 @@ def test_resource_envelope_is_sanitized_and_uri_is_removed(policy):
     }
 
 
-def test_non_allowlisted_tool_is_rejected(policy):
+def test_raw_attachment_tool_is_rejected(policy):
     with pytest.raises(PolicyViolation):
         policy.sanitize("get_attachment_content", {"content_base64": "secret"})
+
+
+def test_issue_image_policy_allows_valid_gbl_png(monkeypatch):
+    monkeypatch.setenv("SANITIZER_ALLOWED_IMAGE_PROJECTS", "GBL")
+    image_policy = OutputPolicy(FakeTextSanitizer(), profile="strict")
+    content = base64.b64encode(b"\x89PNG\r\n\x1a\nimage-data").decode("ascii")
+
+    result = image_policy.sanitize(
+        "get_issue_image",
+        {
+            "issue_id": "GBL-4649",
+            "project": "GBL",
+            "attachment_id": "1-1",
+            "filename": "Ivan Ivanov.png",
+            "mime_type": "image/png",
+            "content": content,
+        },
+    )
+
+    assert result["issue_id"] == "GBL-4649"
+    assert result["filename"] == "[PERSON].png"
+    assert result["content"] == content
+
+
+@pytest.mark.parametrize(
+    ("project", "mime_type", "content"),
+    [
+        ("SUP", "image/png", b"\x89PNG\r\n\x1a\nimage-data"),
+        ("GBL", "application/pdf", b"%PDF-1.7"),
+        ("GBL", "image/png", b"not-png"),
+    ],
+)
+def test_issue_image_policy_rejects_unauthorized_or_invalid_images(
+    monkeypatch, project, mime_type, content
+):
+    monkeypatch.setenv("SANITIZER_ALLOWED_IMAGE_PROJECTS", "GBL")
+    image_policy = OutputPolicy(FakeTextSanitizer(), profile="strict")
+
+    with pytest.raises(PolicyViolation):
+        image_policy.sanitize(
+            "get_issue_image",
+            {
+                "issue_id": f"{project}-1",
+                "project": project,
+                "attachment_id": "1-1",
+                "filename": "file.bin",
+                "mime_type": mime_type,
+                "content": base64.b64encode(content).decode("ascii"),
+            },
+        )

@@ -55,6 +55,9 @@ class Config:
     # Tool filtering configuration
     DISABLED_TOOLS: str = os.getenv("DISABLED_TOOLS", "")
     ENABLED_TOOLS: str = os.getenv("ENABLED_TOOLS", "")
+    ALLOWED_IMAGE_PROJECTS: str = os.getenv(
+        "YOUTRACK_ALLOWED_IMAGE_PROJECTS", ""
+    )
     # Fail-closed operation policy. Enabled by default for safe MCP usage.
     READ_ONLY_MODE: bool = os.getenv("YOUTRACK_READ_ONLY", "true").lower() in (
         "true",
@@ -134,6 +137,15 @@ class Config:
         return {
             cls._normalize_tool_name(name)
             for name in cls.ENABLED_TOOLS.split(",")
+            if name.strip()
+        }
+
+    @classmethod
+    def get_allowed_image_projects(cls) -> set[str]:
+        """Return project short names allowed to expose raster image attachments."""
+        return {
+            name.strip().upper()
+            for name in cls.ALLOWED_IMAGE_PROJECTS.split(",")
             if name.strip()
         }
 

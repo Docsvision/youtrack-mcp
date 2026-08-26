@@ -1088,11 +1088,9 @@ class IssuesClient:
             )
 
         # Check file size limit for base64 encoding
-        # Base64 encoding increases size by ~33%, so for 1MB base64 limit, max original size is ~750KB
-        MAX_ORIGINAL_SIZE = 750 * 1024  # 750KB original file
-        MAX_BASE64_SIZE = (
-            1024 * 1024
-        )  # 1MB after base64 encoding (Claude Desktop limit)
+        # Keep binary MCP payloads bounded while allowing ordinary screenshots.
+        MAX_ORIGINAL_SIZE = 5 * 1024 * 1024
+        MAX_BASE64_SIZE = 7 * 1024 * 1024
 
         file_size = attachment_info.get("size", 0)
         filename = attachment_info.get("name", attachment_id)
@@ -2421,11 +2419,9 @@ class IssuesClient:
             )
 
         # Check file size limit for base64 encoding
-        # Base64 encoding increases size by ~33%, so for 1MB base64 limit, max original size is ~750KB
-        MAX_ORIGINAL_SIZE = 750 * 1024  # 750KB original file
-        MAX_BASE64_SIZE = (
-            1024 * 1024
-        )  # 1MB after base64 encoding (Claude Desktop limit)
+        # Keep binary MCP payloads bounded while allowing ordinary screenshots.
+        MAX_ORIGINAL_SIZE = 5 * 1024 * 1024
+        MAX_BASE64_SIZE = 7 * 1024 * 1024
 
         file_size = attachment_info.get("size", 0)
         filename = attachment_info.get("name", attachment_id)

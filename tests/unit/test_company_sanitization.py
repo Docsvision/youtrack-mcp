@@ -193,3 +193,23 @@ def test_company_redaction_runs_before_central_sidecar():
 
     assert result["description"].startswith("COMPANY-")
     assert backend.payload == result
+
+
+@pytest.mark.unit
+def test_company_redaction_preserves_custom_field_names():
+    redactor = CompanyDictionaryRedactor(
+        lambda: ["До", "РКЦ Прогресс"],
+        key="test-key",
+    )
+
+    result = redactor.redact(
+        {
+            "customFields": [
+                {"name": "Ответить до", "value": "РКЦ Прогресс"},
+            ]
+        }
+    )
+
+    field = result["customFields"][0]
+    assert field["name"] == "Ответить до"
+    assert field["value"].startswith("COMPANY-")

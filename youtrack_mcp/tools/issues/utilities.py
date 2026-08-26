@@ -275,10 +275,17 @@ class Utilities:
                 },
             },
             "get_attachment_content": {
-                "description": 'Get attachment content as base64-encoded string (max 10MB). Example: get_attachment_content(issue_id="DEMO-123", attachment_id="1-123")',
+                "description": 'Get attachment content as base64-encoded string (max 5MB). Example: get_attachment_content(issue_id="DEMO-123", attachment_id="1-123")',
                 "parameter_descriptions": {
                     "issue_id": "Issue identifier like 'DEMO-123'",
                     "attachment_id": "Attachment ID like '1-123'",
+                },
+            },
+            "get_issue_image": {
+                "description": 'Get an allowed raster image attachment as base64. Example: get_issue_image(issue_id="GBL-123", attachment_id="1-123")',
+                "parameter_descriptions": {
+                    "issue_id": "Issue identifier in an allowed project, such as 'GBL-123'",
+                    "attachment_id": "Image attachment ID returned by get_issue",
                 },
             },
             "delete_attachment": {
@@ -288,4 +295,4 @@ class Utilities:
                     "attachment_id": "Attachment ID to delete like '1-123'",
                 },
             },
-        } 
+        }

@@ -41,7 +41,12 @@ def test_diagnostic_issue_retains_safe_fields_and_pseudonymizes_identities():
                 {"name": "State", "value": {"name": "Open", "id": "1"}},
                 {"name": "Fix versions", "value": [{"name": "6.1.0"}]},
                 {"name": "Assignee", "value": {"login": "petr", "name": "Petr"}},
-                {"name": "Customer", "value": "must be dropped"},
+                {"name": "Customer", "value": "must be retained"},
+                {
+                    "name": "Developer",
+                    "$type": "SingleUserIssueCustomField",
+                    "value": {"login": "olga", "name": "Olga"},
+                },
             ],
         },
     )
@@ -56,8 +61,46 @@ def test_diagnostic_issue_retains_safe_fields_and_pseudonymizes_identities():
             {"name": "State", "value": {"name": "Open"}},
             {"name": "Fix versions", "value": [{"name": "6.1.0"}]},
             {"name": "Assignee", "value": pseudonymizer.alias("petr")},
+            {"name": "Customer", "value": "must be retained"},
+            {"name": "Developer", "value": pseudonymizer.alias("olga")},
         ],
     }
+
+
+def test_diagnostic_issue_exposes_only_gbl_raster_attachment_metadata(monkeypatch):
+    monkeypatch.setenv("SANITIZER_ALLOWED_IMAGE_PROJECTS", "GBL")
+    policy, _ = make_policy()
+
+    result = policy.sanitize(
+        "get_issue",
+        {
+            "idReadable": "GBL-1",
+            "project": {"shortName": "GBL", "name": "Global"},
+            "attachments": [
+                {
+                    "id": "1-1",
+                    "name": "screen.png",
+                    "mimeType": "image/png",
+                    "size": 123,
+                },
+                {
+                    "id": "1-2",
+                    "name": "spec.pdf",
+                    "mimeType": "application/pdf",
+                    "size": 456,
+                },
+            ],
+        },
+    )
+
+    assert result["attachments"] == [
+        {
+            "id": "1-1",
+            "name": "screen.png",
+            "mimeType": "image/png",
+            "size": 123,
+        }
+    ]
 
 
 def test_comment_author_and_matching_mention_use_same_alias():

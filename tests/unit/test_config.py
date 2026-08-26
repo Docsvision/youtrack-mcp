@@ -25,6 +25,7 @@ class TestConfig:
             "MCP_SERVER_NAME": Config.MCP_SERVER_NAME,
             "MCP_SERVER_DESCRIPTION": Config.MCP_SERVER_DESCRIPTION,
             "MCP_DEBUG": Config.MCP_DEBUG,
+            "ALLOWED_IMAGE_PROJECTS": Config.ALLOWED_IMAGE_PROJECTS,
         }
 
         # Reset to defaults
@@ -55,6 +56,9 @@ class TestConfig:
             "1",
             "yes",
         )
+        Config.ALLOWED_IMAGE_PROJECTS = os.getenv(
+            "YOUTRACK_ALLOWED_IMAGE_PROJECTS", ""
+        )
 
     def teardown_method(self):
         """Restore original values after each test."""
@@ -70,6 +74,12 @@ class TestConfig:
         assert Config.MCP_SERVER_NAME == "youtrack-mcp"
         assert Config.MCP_SERVER_DESCRIPTION == "YouTrack MCP Server"
         assert Config.MCP_DEBUG is False
+
+    @pytest.mark.unit
+    def test_allowed_image_projects_are_normalized(self):
+        Config.ALLOWED_IMAGE_PROJECTS = " GBL, demo "
+
+        assert Config.get_allowed_image_projects() == {"GBL", "DEMO"}
 
     @pytest.mark.unit
     def test_from_dict(self):

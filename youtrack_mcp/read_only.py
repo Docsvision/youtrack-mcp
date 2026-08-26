@@ -22,6 +22,7 @@ READ_ONLY_TOOLS = frozenset(
         "get_field_values",
         "get_help",
         "get_issue",
+        "get_issue_image",
         "get_issue_comments",
         "get_issue_links",
         "get_issue_raw",

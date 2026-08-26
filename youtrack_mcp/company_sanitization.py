@@ -291,7 +291,27 @@ class CompanyDictionaryRedactor:
         if isinstance(payload, list):
             return [self._redact_value(item) for item in payload]
         if isinstance(payload, dict):
-            return {key: self._redact_value(value) for key, value in payload.items()}
+            redacted = {}
+            for key, value in payload.items():
+                if key in {"customFields", "custom_fields"} and isinstance(value, list):
+                    redacted[key] = [
+                        (
+                            {
+                                field_key: (
+                                    field_value
+                                    if field_key == "name"
+                                    else self._redact_value(field_value)
+                                )
+                                for field_key, field_value in field.items()
+                            }
+                            if isinstance(field, dict)
+                            else self._redact_value(field)
+                        )
+                        for field in value
+                    ]
+                else:
+                    redacted[key] = self._redact_value(value)
+            return redacted
         return payload
 
     def redact(self, payload: Any) -> Any:

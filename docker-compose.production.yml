@@ -18,7 +18,8 @@ x-mcp-common: &mcp-common
     PORT: "8000"
     YOUTRACK_READ_ONLY: "true"
     YOUTRACK_ENABLE_KB: "true"
-    ENABLED_TOOLS: get_issue,search_issues,get_issue_comments,get_issue_links,get_projects,get_article,list_articles,search_articles
+    ENABLED_TOOLS: get_issue,get_issue_image,search_issues,get_issue_comments,get_issue_links,get_projects,get_article,list_articles,search_articles
+    YOUTRACK_ALLOWED_IMAGE_PROJECTS: GBL
     YOUTRACK_TOKEN_FILE: /run/secrets/youtrack_token
   healthcheck:
     test:
@@ -57,7 +58,8 @@ services:
       SANITIZER_PROFILE: diagnostic
       SANITIZER_PII_SCORE_THRESHOLD: "0.4"
       SANITIZER_PSEUDONYM_KEY_FILE: /run/secrets/sanitizer_pseudonym_key
-      SANITIZER_ALLOWED_CUSTOM_FIELDS: State,Priority,Type,Subsystem,Fix versions,Affected versions,Estimation,Assignee
+      SANITIZER_ALLOWED_CUSTOM_FIELDS: "*"
+      SANITIZER_ALLOWED_IMAGE_PROJECTS: GBL
     secrets:
       - sanitizer_pseudonym_key
     expose:

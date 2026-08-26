@@ -222,6 +222,7 @@ def normalize_parameter_names(func_name: str, kwargs: Dict[str, Any]) -> Dict[st
         "create_issue",
         "issue_create_issue",
         "get_issue",
+        "get_issue_image",
         "add_comment",
         "get_issue_raw",
     ]

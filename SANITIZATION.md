@@ -4,7 +4,7 @@ The MCP server sends every tool result through one central output boundary.
 The boundary calls a local sidecar which applies two independent protections:
 
 1. A per-tool structural allowlist removes fields which the model does not
-   need. The diagnostic profile retains useful workflow fields and replaces
+   need. Issue reads retain all custom fields. The diagnostic profile replaces
    identities and `@login` mentions with stable non-reversible aliases. The
    strict profile drops identities entirely.
 2. Microsoft Presidio with English and Russian Stanza models anonymizes PII,
@@ -75,15 +75,20 @@ If `YOUTRACK_COMPANY_PSEUDONYM_KEY` is omitted, its value is derived locally
 from the YouTrack API token. Setting an independent secret keeps aliases stable
 when that API token is rotated.
 
-The optional `SANITIZER_ALLOWED_CUSTOM_FIELDS` sidecar variable is a
-comma-separated allowlist. Its default value is:
+The optional `SANITIZER_ALLOWED_CUSTOM_FIELDS` sidecar variable can restrict
+issue reads to a comma-separated allowlist. By default, and when set to `*`,
+all custom fields are retained. For example, a restricted configuration is:
 
 ```text
 State,Priority,Type,Subsystem,Fix versions,Affected versions,Estimation,Assignee
 ```
 
-Attachments, raw issues, users, writes, and Knowledge Base tools are rejected
-by policy. They should also remain absent from `ENABLED_TOOLS`.
+Raw attachments, raw issues, users, and writes are rejected by policy. The
+`get_issue_image` tool is a narrow exception for raster images. It is enabled
+only for projects listed in both `YOUTRACK_ALLOWED_IMAGE_PROJECTS` on the MCP
+service and `SANITIZER_ALLOWED_IMAGE_PROJECTS` on the sidecar. The production
+configuration allows `GBL`. Image bytes are type- and size-checked but are not
+OCR-sanitized; filenames still pass through text sanitization.
 
 ## Read-only mode
 
