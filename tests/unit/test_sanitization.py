@@ -5,7 +5,11 @@ import json
 import pytest
 
 from youtrack_mcp.mcp_wrappers import create_bound_tool
-from youtrack_mcp.sanitization import OutputSanitizationBoundary, SanitizationError
+from youtrack_mcp.sanitization import (
+    HttpOutputSanitizer,
+    OutputSanitizationBoundary,
+    SanitizationError,
+)
 
 
 class RecordingSanitizer:
@@ -16,6 +20,32 @@ class RecordingSanitizer:
     def sanitize(self, tool_name, payload):
         self.calls.append((tool_name, payload))
         return self.replacement
+
+
+@pytest.mark.unit
+def test_http_sanitizer_uses_separate_connect_and_read_timeouts(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"payload": {"safe": True}}
+
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        return Response()
+
+    monkeypatch.setattr("youtrack_mcp.sanitization.requests.post", fake_post)
+    sanitizer = HttpOutputSanitizer(
+        "http://sanitizer:8090/sanitize",
+        timeout_seconds=45,
+        connect_timeout_seconds=2,
+    )
+
+    assert sanitizer.sanitize("get_issue", {"id": "DEMO-1"}) == {"safe": True}
+    assert calls[0][1]["timeout"] == (2, 45)
 
 
 @pytest.mark.unit

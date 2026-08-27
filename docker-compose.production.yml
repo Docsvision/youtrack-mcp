@@ -6,6 +6,8 @@ x-mcp-common: &mcp-common
     dockerfile: Dockerfile
   image: youtrack-mcp:local
   restart: unless-stopped
+  init: true
+  mem_limit: 1g
   read_only: true
   tmpfs:
     - /tmp:size=64m,mode=1777
@@ -21,15 +23,19 @@ x-mcp-common: &mcp-common
     ENABLED_TOOLS: get_issue,get_issue_image,search_issues,get_issue_comments,get_issue_links,get_projects,get_article,list_articles,search_articles
     YOUTRACK_ALLOWED_IMAGE_PROJECTS: GBL
     YOUTRACK_TOKEN_FILE: /run/secrets/youtrack_token
+    YOUTRACK_CONNECT_TIMEOUT: "3"
+    YOUTRACK_READ_TIMEOUT: "30"
+    MCP_TOOL_MAX_CONCURRENCY: "${MCP_TOOL_MAX_CONCURRENCY:-8}"
+    MCP_TOOL_MAX_PENDING: "${MCP_TOOL_MAX_PENDING:-32}"
+    MCP_TOOL_QUEUE_TIMEOUT: "${MCP_TOOL_QUEUE_TIMEOUT:-40}"
   healthcheck:
     test:
       - CMD
       - python
       - -c
       - >-
-        import socket;
-        connection = socket.create_connection(('127.0.0.1', 8000), 5);
-        connection.close()
+        import urllib.request;
+        urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=5)
     interval: 30s
     timeout: 6s
     retries: 3
@@ -47,6 +53,22 @@ services:
       dockerfile: sanitizer_service/Dockerfile
     image: youtrack-mcp-sanitizer:local
     restart: unless-stopped
+    init: true
+    cpus: "${SANITIZER_CPU_LIMIT:-4.0}"
+    mem_limit: "${SANITIZER_MEMORY_LIMIT:-5g}"
+    command:
+      - uvicorn
+      - sanitizer_service.service:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8090"
+      - --workers
+      - "${SANITIZER_WORKERS:-2}"
+      - --limit-concurrency
+      - "${SANITIZER_HTTP_MAX_CONNECTIONS:-64}"
+      - --backlog
+      - "${SANITIZER_HTTP_BACKLOG:-256}"
     read_only: true
     tmpfs:
       - /tmp:size=128m,mode=1777
@@ -60,6 +82,12 @@ services:
       SANITIZER_PSEUDONYM_KEY_FILE: /run/secrets/sanitizer_pseudonym_key
       SANITIZER_ALLOWED_CUSTOM_FIELDS: "*"
       SANITIZER_ALLOWED_IMAGE_PROJECTS: GBL
+      SANITIZER_PII_BATCH_MAX_CHARS: "2000"
+      SANITIZER_MAX_CONCURRENCY_PER_WORKER: "1"
+      SANITIZER_QUEUE_TIMEOUT: "40"
+      OMP_NUM_THREADS: "${SANITIZER_THREADS_PER_WORKER:-2}"
+      MKL_NUM_THREADS: "${SANITIZER_THREADS_PER_WORKER:-2}"
+      OPENBLAS_NUM_THREADS: "${SANITIZER_THREADS_PER_WORKER:-2}"
     secrets:
       - sanitizer_pseudonym_key
     expose:
@@ -73,7 +101,7 @@ services:
         - -c
         - >-
           import urllib.request;
-          urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=5)
+          urllib.request.urlopen('http://127.0.0.1:8090/ready', timeout=5)
       interval: 30s
       timeout: 6s
       retries: 5
@@ -93,7 +121,8 @@ services:
       MCP_SERVER_NAME: youtrack-mcp-sanitized
       MCP_SERVER_DESCRIPTION: Read-only YouTrack MCP with mandatory output sanitization
       YOUTRACK_SANITIZER_URL: http://sanitizer:8090/sanitize
-      YOUTRACK_SANITIZER_TIMEOUT: "120"
+      YOUTRACK_SANITIZER_CONNECT_TIMEOUT: "2"
+      YOUTRACK_SANITIZER_TIMEOUT: "45"
       YOUTRACK_SANITIZER_FAIL_CLOSED: "true"
       YOUTRACK_SANITIZER_REQUIRED: "true"
       YOUTRACK_COMPANY_SANITIZATION: "true"

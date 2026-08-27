@@ -60,13 +60,14 @@ class HttpOutputSanitizer:
 
     url: str
     timeout_seconds: float
+    connect_timeout_seconds: float = 2.0
 
     def sanitize(self, tool_name: str, payload: Any) -> Any:
         try:
             response = requests.post(
                 self.url,
                 json={"tool": tool_name, "payload": payload},
-                timeout=self.timeout_seconds,
+                timeout=(self.connect_timeout_seconds, self.timeout_seconds),
             )
             response.raise_for_status()
             body = response.json()
@@ -170,6 +171,7 @@ def get_output_sanitization_boundary() -> OutputSanitizationBoundary:
         backend: OutputSanitizer = HttpOutputSanitizer(
             url=Config.SANITIZER_URL,
             timeout_seconds=Config.SANITIZER_TIMEOUT,
+            connect_timeout_seconds=Config.SANITIZER_CONNECT_TIMEOUT,
         )
     elif Config.SANITIZER_REQUIRED:
         backend = UnavailableSanitizer()

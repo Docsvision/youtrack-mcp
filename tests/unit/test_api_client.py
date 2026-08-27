@@ -4,6 +4,7 @@ Comprehensive unit tests for YouTrack API client.
 
 import pytest
 import json
+import threading
 import time
 from unittest.mock import Mock, patch, MagicMock
 from requests.exceptions import ConnectionError, Timeout
@@ -265,7 +266,9 @@ class TestYouTrackClient:
         result = client._make_request("GET", "issues")
 
         mock_session.request.assert_called_once_with(
-            "GET", "https://test.youtrack.cloud/api/issues"
+            "GET",
+            "https://test.youtrack.cloud/api/issues",
+            timeout=(3.0, 30.0),
         )
         assert result == {"test": "data"}
 
@@ -332,6 +335,7 @@ class TestYouTrackClient:
             "GET",
             "https://test.youtrack.cloud/api/issues",
             params={"project": "TEST"},
+            timeout=(3.0, 30.0),
         )
         assert result == {"test": "data"}
 
@@ -347,7 +351,10 @@ class TestYouTrackClient:
         result = client.post("issues", data=data)
 
         mock_session.request.assert_called_once_with(
-            "POST", "https://test.youtrack.cloud/api/issues", json=data
+            "POST",
+            "https://test.youtrack.cloud/api/issues",
+            json=data,
+            timeout=(3.0, 30.0),
         )
         assert result == {"id": "new-issue"}
 
@@ -367,6 +374,7 @@ class TestYouTrackClient:
             "https://test.youtrack.cloud/api/issues",
             data=None,
             json=json_data,
+            timeout=(3.0, 30.0),
         )
         assert result == {"id": "new-issue"}
 
@@ -386,6 +394,7 @@ class TestYouTrackClient:
             "https://test.youtrack.cloud/api/issues/ISSUE-1",
             data=data,
             json=None,
+            timeout=(3.0, 30.0),
         )
         assert result == {"updated": True}
 
@@ -400,7 +409,9 @@ class TestYouTrackClient:
         result = client.delete("issues/ISSUE-1")
 
         mock_session.request.assert_called_once_with(
-            "DELETE", "https://test.youtrack.cloud/api/issues/ISSUE-1"
+            "DELETE",
+            "https://test.youtrack.cloud/api/issues/ISSUE-1",
+            timeout=(3.0, 30.0),
         )
         assert result == {}
 
@@ -417,6 +428,33 @@ class TestYouTrackClient:
         """Test explicit close method."""
         client.close()
         mock_session.close.assert_called_once()
+
+    @pytest.mark.unit
+    def test_sessions_are_isolated_between_worker_threads(self):
+        """Concurrent MCP tools must not mutate one shared requests session."""
+        main_session = Mock()
+        worker_session = Mock()
+        with patch(
+            "youtrack_mcp.api.client.requests.Session",
+            side_effect=[main_session, worker_session],
+        ):
+            client = YouTrackClient(
+                base_url="https://test.youtrack.cloud",
+                api_token="test-token",
+                verify_ssl=True,
+            )
+            sessions = []
+            worker = threading.Thread(
+                target=lambda: sessions.append(client._get_session())
+            )
+            worker.start()
+            worker.join(timeout=1)
+
+        assert sessions == [worker_session]
+        assert client._get_session() is main_session
+        client.close()
+        main_session.close.assert_called_once()
+        worker_session.close.assert_called_once()
 
     @pytest.mark.unit
     def test_ssl_verification_disabled(self, mock_session):

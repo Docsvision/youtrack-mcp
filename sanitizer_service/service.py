@@ -5,11 +5,12 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
-import json
 import logging
 import os
 import re
 import secrets
+import threading
+import time
 from copy import copy
 from contextlib import asynccontextmanager
 from functools import lru_cache
@@ -17,6 +18,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -180,7 +182,19 @@ class PresidioAndSecretsSanitizer:
             offset += len(text) + len(separator)
 
         combined = separator.join(parts)
-        combined_results = self._analyze_pii(combined)
+        try:
+            combined_results = self._analyze_pii(combined)
+        except ValueError:
+            # Presidio's context enhancer can fail to align a recognizer match
+            # with tokens in a synthetic, joined multilingual document. Retry
+            # the original values independently; a repeated failure still
+            # propagates and preserves fail-closed behavior.
+            logger.warning(
+                "Batch PII analysis failed; retrying %d values individually",
+                len(texts),
+                exc_info=True,
+            )
+            return [self._redact_pii(text) for text in texts]
         sanitized = []
         for text, (start, end) in zip(texts, offsets):
             local_results = []
@@ -701,30 +715,129 @@ def get_policy() -> OutputPolicy:
     return OutputPolicy(PresidioAndSecretsSanitizer())
 
 
+class RuntimeState:
+    """Thread-safe operational state exposed without payload contents."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.ready = False
+        self.queued = 0
+        self.active = 0
+        self.total = 0
+        self.failures = 0
+        self.rejected = 0
+        self.last_duration_seconds = 0.0
+
+    def set_ready(self, ready: bool) -> None:
+        with self._lock:
+            self.ready = ready
+
+    def queue_started(self) -> None:
+        with self._lock:
+            self.queued += 1
+
+    def queue_finished(self, *, acquired: bool) -> None:
+        with self._lock:
+            self.queued -= 1
+            if not acquired:
+                self.rejected += 1
+
+    def started(self) -> None:
+        with self._lock:
+            self.active += 1
+            self.total += 1
+
+    def finished(self, *, duration_seconds: float, failed: bool) -> None:
+        with self._lock:
+            self.active -= 1
+            self.failures += int(failed)
+            self.last_duration_seconds = duration_seconds
+
+    def snapshot(self) -> dict[str, int | float | bool]:
+        with self._lock:
+            return {
+                "workerPid": os.getpid(),
+                "ready": self.ready,
+                "queued": self.queued,
+                "active": self.active,
+                "total": self.total,
+                "failures": self.failures,
+                "rejected": self.rejected,
+                "lastDurationSeconds": round(self.last_duration_seconds, 3),
+            }
+
+
+runtime_state = RuntimeState()
+sanitizer_slots = threading.BoundedSemaphore(
+    max(1, int(os.getenv("SANITIZER_MAX_CONCURRENCY_PER_WORKER", "1")))
+)
+sanitizer_queue_timeout = max(0.01, float(os.getenv("SANITIZER_QUEUE_TIMEOUT", "5")))
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     get_policy()
-    yield
+    runtime_state.set_ready(True)
+    try:
+        yield
+    finally:
+        runtime_state.set_ready(False)
 
 
 app = FastAPI(title="YouTrack MCP Sanitizer", version="1.0.0", lifespan=lifespan)
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
+async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/ready")
+async def ready() -> JSONResponse:
+    snapshot = runtime_state.snapshot()
+    return JSONResponse(snapshot, status_code=200 if snapshot["ready"] else 503)
+
+
+@app.get("/metrics")
+async def metrics() -> dict[str, int | float | bool]:
+    return runtime_state.snapshot()
 
 
 @app.post("/sanitize", response_model=SanitizeResponse)
 def sanitize(request: SanitizeRequest) -> SanitizeResponse:
+    runtime_state.queue_started()
+    acquired = sanitizer_slots.acquire(timeout=sanitizer_queue_timeout)
+    runtime_state.queue_finished(acquired=acquired)
+    if not acquired:
+        logger.warning(
+            "Rejected sanitizer request for tool '%s': capacity exhausted",
+            request.tool,
+        )
+        raise HTTPException(status_code=503, detail="sanitizer busy")
+
+    runtime_state.started()
+    started_at = time.monotonic()
+    failed = False
     try:
         payload = get_policy().sanitize(request.tool, request.payload)
     except PolicyViolation as exc:
+        failed = True
         logger.warning("Sanitization policy rejected tool '%s'", request.tool)
         raise HTTPException(
             status_code=403, detail="output rejected by policy"
         ) from exc
     except Exception as exc:
+        failed = True
         logger.exception("Sanitization failed for tool '%s'", request.tool)
         raise HTTPException(status_code=503, detail="sanitization failed") from exc
+    finally:
+        duration_seconds = time.monotonic() - started_at
+        runtime_state.finished(duration_seconds=duration_seconds, failed=failed)
+        sanitizer_slots.release()
+        logger.info(
+            "Sanitized tool '%s': duration=%.3fs failed=%s",
+            request.tool,
+            duration_seconds,
+            failed,
+        )
     return SanitizeResponse(payload=payload)

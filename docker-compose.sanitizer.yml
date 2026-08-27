@@ -9,6 +9,25 @@ services:
       SANITIZER_PROFILE: diagnostic
       SANITIZER_PSEUDONYM_KEY: "${SANITIZER_PSEUDONYM_KEY:?Set SANITIZER_PSEUDONYM_KEY}"
       SANITIZER_PII_SCORE_THRESHOLD: "0.4"
+      SANITIZER_PII_BATCH_MAX_CHARS: "2000"
+      SANITIZER_MAX_CONCURRENCY_PER_WORKER: "1"
+      SANITIZER_QUEUE_TIMEOUT: "40"
+      OMP_NUM_THREADS: "${SANITIZER_THREADS_PER_WORKER:-2}"
+      MKL_NUM_THREADS: "${SANITIZER_THREADS_PER_WORKER:-2}"
+      OPENBLAS_NUM_THREADS: "${SANITIZER_THREADS_PER_WORKER:-2}"
+    command:
+      - uvicorn
+      - sanitizer_service.service:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8090"
+      - --workers
+      - "${SANITIZER_WORKERS:-2}"
+      - --limit-concurrency
+      - "${SANITIZER_HTTP_MAX_CONNECTIONS:-64}"
+      - --backlog
+      - "${SANITIZER_HTTP_BACKLOG:-256}"
     healthcheck:
       test:
         - CMD
@@ -16,7 +35,7 @@ services:
         - -c
         - >-
           import urllib.request;
-          urllib.request.urlopen('http://127.0.0.1:8090/health')
+          urllib.request.urlopen('http://127.0.0.1:8090/ready', timeout=5)
       interval: 30s
       timeout: 5s
       retries: 3

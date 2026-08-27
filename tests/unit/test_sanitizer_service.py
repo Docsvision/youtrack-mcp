@@ -225,6 +225,32 @@ def test_presidio_batch_limits_combined_document_size():
     ]
 
 
+def test_presidio_batch_retries_values_individually_after_alignment_error():
+    class AlignmentAnalyzer:
+        def __init__(self):
+            self.calls = []
+
+        def analyze(self, *, text, language, score_threshold):
+            self.calls.append((text, language, score_threshold))
+            if "\n\n" in text:
+                raise ValueError("Did not find word 'V2' in the list of tokens")
+            return []
+
+    sanitizer = PresidioAndSecretsSanitizer.__new__(PresidioAndSecretsSanitizer)
+    sanitizer._analyzer = AlignmentAnalyzer()
+    sanitizer._score_threshold = 0.4
+    sanitizer._redact_secrets = lambda text: text
+
+    assert sanitizer.sanitize_many(["V2", "D0"]) == ["V2", "D0"]
+    assert [call[0] for call in sanitizer._analyzer.calls] == [
+        "V2\n\nD0",
+        "V2",
+        "V2",
+        "D0",
+        "D0",
+    ]
+
+
 def test_resource_envelope_is_sanitized_and_uri_is_removed(policy):
     result = policy.sanitize(
         "get_issue",

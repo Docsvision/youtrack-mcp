@@ -3,6 +3,7 @@ Base client for YouTrack REST API.
 """
 
 import logging
+import threading
 import time
 from typing import Any, Dict, Optional
 import json
@@ -11,7 +12,7 @@ import random
 import requests
 from pydantic import BaseModel, ConfigDict
 
-from youtrack_mcp.config import config
+from youtrack_mcp.config import Config, config
 
 logger = logging.getLogger(__name__)
 
@@ -103,14 +104,28 @@ class YouTrackClient:
         self.verify_ssl = verify_ssl if verify_ssl is not None else config.VERIFY_SSL
         self.max_retries = max_retries
         self.retry_delay = retry_delay
+        self.request_timeout = (Config.CONNECT_TIMEOUT, Config.READ_TIMEOUT)
 
         # Validate required configuration
         if not self.api_token:
             raise ValueError("API token is required")
 
-        # Session for connection pooling and header reuse
-        self.session = requests.Session()
-        self.session.headers.update(
+        # requests.Session is not safe to share between concurrently executing
+        # MCP tools. Keep one connection pool per worker thread instead.
+        self._session_local = threading.local()
+        self._sessions_lock = threading.Lock()
+        self._sessions: list[requests.Session] = []
+        self.session = self._create_session()
+        self._session_local.session = self.session
+
+        logger.debug(
+            f"YouTrack client initialized for {'YouTrack Cloud' if config.is_cloud_instance() else self.base_url}"
+        )
+
+    def _create_session(self) -> requests.Session:
+        """Create and register a session for the current execution thread."""
+        session = requests.Session()
+        session.headers.update(
             {
                 "Authorization": f"Bearer {self.api_token}",
                 "Accept": "application/json",
@@ -119,10 +134,10 @@ class YouTrackClient:
         )
 
         # Set SSL verification options
-        self.session.verify = self.verify_ssl
+        session.verify = self.verify_ssl
         if not self.verify_ssl:
             # Use the custom SSL context
-            self.session.verify = False
+            session.verify = False
             # Suppress insecure request warnings
             from requests.packages.urllib3.exceptions import (
                 InsecureRequestWarning,
@@ -130,9 +145,17 @@ class YouTrackClient:
 
             requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-        logger.debug(
-            f"YouTrack client initialized for {'YouTrack Cloud' if config.is_cloud_instance() else self.base_url}"
-        )
+        with self._sessions_lock:
+            self._sessions.append(session)
+        return session
+
+    def _get_session(self) -> requests.Session:
+        """Return this thread's connection pool, creating it on first use."""
+        session = getattr(self._session_local, "session", None)
+        if session is None:
+            session = self._create_session()
+            self._session_local.session = session
+        return session
 
     def _get_api_url(self, endpoint: str) -> str:
         """
@@ -250,7 +273,8 @@ class YouTrackClient:
 
         while retries <= self.max_retries:
             try:
-                response = self.session.request(method, url, **kwargs)
+                kwargs.setdefault("timeout", self.request_timeout)
+                response = self._get_session().request(method, url, **kwargs)
                 return self._handle_response(response)
             except (ServerError, RateLimitError) as e:
                 # These are potentially transient, so we retry
@@ -389,20 +413,22 @@ class YouTrackClient:
             Parsed JSON response
         """
         url = self._get_api_url(endpoint)
-        request_headers = dict(self.session.headers)
+        session = self._get_session()
+        request_headers = dict(session.headers)
         # Remove JSON content-type so requests can set multipart boundary
         if "Content-Type" in request_headers:
             request_headers.pop("Content-Type", None)
         if headers:
             request_headers.update(headers)
 
-        response = self.session.request(
+        response = session.request(
             "POST",
             url,
             files=files,
             data=data,
             headers=request_headers,
-            verify=self.session.verify,
+            verify=session.verify,
+            timeout=self.request_timeout,
         )
         return self._handle_response(response)
 
@@ -424,16 +450,18 @@ class YouTrackClient:
             Raw response bytes
         """
         url = self._get_api_url(endpoint)
-        request_headers = dict(self.session.headers)
+        session = self._get_session()
+        request_headers = dict(session.headers)
         if headers:
             request_headers.update(headers)
-        response = self.session.request(
+        response = session.request(
             "GET",
             url,
             params=params,
             headers=request_headers,
-            verify=self.session.verify,
+            verify=session.verify,
             stream=True,
+            timeout=self.request_timeout,
         )
         status_code = response.status_code
         if 200 <= status_code < 300:
@@ -446,8 +474,12 @@ class YouTrackClient:
         )
 
     def close(self) -> None:
-        """Close the API client session."""
-        self.session.close()
+        """Close all thread-local API client sessions."""
+        with self._sessions_lock:
+            sessions = self._sessions[:]
+            self._sessions.clear()
+        for session in sessions:
+            session.close()
 
     def __enter__(self):
         """Enter context manager."""

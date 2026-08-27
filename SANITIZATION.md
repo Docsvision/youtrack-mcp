@@ -52,6 +52,37 @@ ENABLED_TOOLS=get_issue,search_issues,get_issue_comments,get_issue_links,get_pro
 When `YOUTRACK_SANITIZER_REQUIRED=true`, the MCP process blocks every tool
 result if the URL is missing or the sanitizer cannot produce a valid response.
 
+## Concurrent use and capacity
+
+MCP protocol handling remains asynchronous while blocking YouTrack and
+sanitizer calls run in a bounded worker pool. Each worker thread has its own
+YouTrack HTTP session, so multiple MCP sessions can execute safely in parallel.
+The sanitizer uses separate Uvicorn worker processes because the NLP pipeline
+is CPU-heavy and is not shared between processes. Work inside each sanitizer
+worker is intentionally serialized to protect the Stanza/Presidio model state.
+
+The production compose file exposes the main capacity controls:
+
+```text
+MCP_TOOL_MAX_CONCURRENCY=8
+MCP_TOOL_MAX_PENDING=32
+MCP_TOOL_QUEUE_TIMEOUT=40
+SANITIZER_WORKERS=2
+SANITIZER_THREADS_PER_WORKER=2
+SANITIZER_MEMORY_LIMIT=5g
+SANITIZER_CPU_LIMIT=4.0
+SANITIZER_MAX_CONCURRENCY_PER_WORKER=1
+SANITIZER_QUEUE_TIMEOUT=40
+```
+
+Increase `SANITIZER_WORKERS` for sustained parallel sanitization, allowing RAM
+for a separate English/Russian NLP model in every worker. Keep
+`SANITIZER_MAX_CONCURRENCY_PER_WORKER=1`; add worker processes or service
+replicas instead of concurrently calling one model instance. The MCP pool and
+pending queue provide backpressure. Once capacity is exhausted, new work gets
+a bounded `server_busy`/HTTP 503 response rather than blocking MCP initialize,
+health checks, and all other users indefinitely.
+
 ## Company dictionary
 
 Before data is sent to the local sidecar, the MCP process reads the enum values

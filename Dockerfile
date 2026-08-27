@@ -23,6 +23,7 @@ ENV TRANSPORT="stdio"
 ENV PORT="8000"
 ENV YOUTRACK_SANITIZER_URL=""
 ENV YOUTRACK_SANITIZER_TIMEOUT="10"
+ENV YOUTRACK_SANITIZER_CONNECT_TIMEOUT="2"
 ENV YOUTRACK_SANITIZER_FAIL_CLOSED="true"
 ENV YOUTRACK_SANITIZER_REQUIRED="false"
 ENV YOUTRACK_READ_ONLY="true"
@@ -31,6 +32,6 @@ USER mcp
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=6s --start-period=20s --retries=3 \
-    CMD python -c "import os,socket; s=socket.create_connection(('127.0.0.1',int(os.getenv('PORT','8000'))),5); s.close()"
+    CMD python -c "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:'+os.getenv('PORT','8000')+'/healthz',timeout=5)"
 
 ENTRYPOINT ["python", "main.py"]

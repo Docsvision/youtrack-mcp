@@ -40,6 +40,8 @@ class Config:
     # API client configuration
     MAX_RETRIES: int = int(os.getenv("YOUTRACK_MAX_RETRIES", "3"))
     RETRY_DELAY: float = float(os.getenv("YOUTRACK_RETRY_DELAY", "1.0"))
+    CONNECT_TIMEOUT: float = float(os.getenv("YOUTRACK_CONNECT_TIMEOUT", "3.0"))
+    READ_TIMEOUT: float = float(os.getenv("YOUTRACK_READ_TIMEOUT", "30.0"))
 
     # MCP Server configuration
     MCP_SERVER_NAME: str = os.getenv("MCP_SERVER_NAME", "youtrack-mcp")
@@ -51,13 +53,14 @@ class Config:
         "1",
         "yes",
     )
+    TOOL_MAX_CONCURRENCY: int = int(os.getenv("MCP_TOOL_MAX_CONCURRENCY", "8"))
+    TOOL_MAX_PENDING: int = int(os.getenv("MCP_TOOL_MAX_PENDING", "32"))
+    TOOL_QUEUE_TIMEOUT: float = float(os.getenv("MCP_TOOL_QUEUE_TIMEOUT", "40.0"))
 
     # Tool filtering configuration
     DISABLED_TOOLS: str = os.getenv("DISABLED_TOOLS", "")
     ENABLED_TOOLS: str = os.getenv("ENABLED_TOOLS", "")
-    ALLOWED_IMAGE_PROJECTS: str = os.getenv(
-        "YOUTRACK_ALLOWED_IMAGE_PROJECTS", ""
-    )
+    ALLOWED_IMAGE_PROJECTS: str = os.getenv("YOUTRACK_ALLOWED_IMAGE_PROJECTS", "")
     # Fail-closed operation policy. Enabled by default for safe MCP usage.
     READ_ONLY_MODE: bool = os.getenv("YOUTRACK_READ_ONLY", "true").lower() in (
         "true",
@@ -70,6 +73,9 @@ class Config:
     # returns {"payload": <sanitized value>} for each request.
     SANITIZER_URL: str = os.getenv("YOUTRACK_SANITIZER_URL", "")
     SANITIZER_TIMEOUT: float = float(os.getenv("YOUTRACK_SANITIZER_TIMEOUT", "5.0"))
+    SANITIZER_CONNECT_TIMEOUT: float = float(
+        os.getenv("YOUTRACK_SANITIZER_CONNECT_TIMEOUT", "2.0")
+    )
     SANITIZER_FAIL_CLOSED: bool = os.getenv(
         "YOUTRACK_SANITIZER_FAIL_CLOSED", "true"
     ).lower() in ("true", "1", "yes")
@@ -87,9 +93,7 @@ class Config:
     COMPANY_REFRESH_SECONDS: float = float(
         os.getenv("YOUTRACK_COMPANY_REFRESH_SECONDS", "86400")
     )
-    COMPANY_PSEUDONYM_KEY: str = os.getenv(
-        "YOUTRACK_COMPANY_PSEUDONYM_KEY", ""
-    )
+    COMPANY_PSEUDONYM_KEY: str = os.getenv("YOUTRACK_COMPANY_PSEUDONYM_KEY", "")
 
     @classmethod
     def _normalize_tool_name(cls, name: str) -> str:
