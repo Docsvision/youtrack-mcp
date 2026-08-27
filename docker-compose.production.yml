@@ -137,7 +137,7 @@ services:
       sanitizer:
         condition: service_healthy
     ports:
-      - "127.0.0.1:8001:8000"
+      - "${MCP_SANITIZED_BIND_IP:-127.0.0.1}:8001:8000"
     networks:
       - default
       - sanitizer_internal
@@ -157,7 +157,7 @@ services:
       - source: youtrack_plain_token
         target: youtrack_token
     ports:
-      - "127.0.0.1:8002:8000"
+      - "${MCP_PLAIN_BIND_IP:-127.0.0.1}:8002:8000"
 
 networks:
   sanitizer_internal:
