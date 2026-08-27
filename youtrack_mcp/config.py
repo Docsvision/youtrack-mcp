@@ -76,6 +76,12 @@ class Config:
     SANITIZER_CONNECT_TIMEOUT: float = float(
         os.getenv("YOUTRACK_SANITIZER_CONNECT_TIMEOUT", "2.0")
     )
+    SANITIZER_CACHE_TTL: float = float(
+        os.getenv("YOUTRACK_SANITIZER_CACHE_TTL", "300.0")
+    )
+    SANITIZER_CACHE_MAX_ENTRIES: int = int(
+        os.getenv("YOUTRACK_SANITIZER_CACHE_MAX_ENTRIES", "256")
+    )
     SANITIZER_FAIL_CLOSED: bool = os.getenv(
         "YOUTRACK_SANITIZER_FAIL_CLOSED", "true"
     ).lower() in ("true", "1", "yes")

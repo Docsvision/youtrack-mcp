@@ -9,6 +9,11 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import threading
+import time
+from collections import OrderedDict
+from concurrent.futures import Future
+from copy import deepcopy
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Protocol
@@ -78,6 +83,81 @@ class HttpOutputSanitizer:
             raise SanitizationError("sanitizer service returned an invalid response")
 
         return body["payload"]
+
+
+class CachingOutputSanitizer:
+    """Bounded safe-result cache with duplicate in-flight request coalescing."""
+
+    def __init__(
+        self,
+        sanitizer: OutputSanitizer,
+        *,
+        ttl_seconds: float = 300.0,
+        max_entries: int = 256,
+    ) -> None:
+        self._sanitizer = sanitizer
+        self._ttl_seconds = max(0.0, ttl_seconds)
+        self._max_entries = max(0, max_entries)
+        self._lock = threading.Lock()
+        self._cache: OrderedDict[str, tuple[float, Any]] = OrderedDict()
+        self._inflight: dict[str, Future[Any]] = {}
+
+    @staticmethod
+    def _key(tool_name: str, payload: Any) -> str | None:
+        try:
+            serialized = json.dumps(
+                [tool_name, payload],
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        except (TypeError, ValueError):
+            return None
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    def sanitize(self, tool_name: str, payload: Any) -> Any:
+        key = self._key(tool_name, payload)
+        if key is None or self._ttl_seconds == 0 or self._max_entries == 0:
+            return self._sanitizer.sanitize(tool_name, payload)
+
+        now = time.monotonic()
+        with self._lock:
+            cached = self._cache.get(key)
+            if cached is not None:
+                expires_at, result = cached
+                if expires_at > now:
+                    self._cache.move_to_end(key)
+                    return deepcopy(result)
+                del self._cache[key]
+
+            pending = self._inflight.get(key)
+            if pending is None:
+                pending = Future()
+                self._inflight[key] = pending
+                owner = True
+            else:
+                owner = False
+
+        if not owner:
+            return deepcopy(pending.result())
+
+        try:
+            result = self._sanitizer.sanitize(tool_name, payload)
+            safe_result = deepcopy(result)
+        except BaseException as exc:
+            with self._lock:
+                self._inflight.pop(key, None)
+                pending.set_exception(exc)
+            raise
+
+        with self._lock:
+            self._cache[key] = (time.monotonic() + self._ttl_seconds, safe_result)
+            self._cache.move_to_end(key)
+            while len(self._cache) > self._max_entries:
+                self._cache.popitem(last=False)
+            self._inflight.pop(key, None)
+            pending.set_result(safe_result)
+        return deepcopy(safe_result)
 
 
 class OutputSanitizationBoundary:
@@ -168,10 +248,14 @@ def get_output_sanitization_boundary() -> OutputSanitizationBoundary:
     """Build the process-wide boundary from environment-backed configuration."""
 
     if Config.SANITIZER_URL:
-        backend: OutputSanitizer = HttpOutputSanitizer(
-            url=Config.SANITIZER_URL,
-            timeout_seconds=Config.SANITIZER_TIMEOUT,
-            connect_timeout_seconds=Config.SANITIZER_CONNECT_TIMEOUT,
+        backend: OutputSanitizer = CachingOutputSanitizer(
+            HttpOutputSanitizer(
+                url=Config.SANITIZER_URL,
+                timeout_seconds=Config.SANITIZER_TIMEOUT,
+                connect_timeout_seconds=Config.SANITIZER_CONNECT_TIMEOUT,
+            ),
+            ttl_seconds=Config.SANITIZER_CACHE_TTL,
+            max_entries=Config.SANITIZER_CACHE_MAX_ENTRIES,
         )
     elif Config.SANITIZER_REQUIRED:
         backend = UnavailableSanitizer()

@@ -1,11 +1,15 @@
 """Tests for the central MCP output-sanitization boundary."""
 
 import json
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
 from youtrack_mcp.mcp_wrappers import create_bound_tool
 from youtrack_mcp.sanitization import (
+    CachingOutputSanitizer,
     HttpOutputSanitizer,
     OutputSanitizationBoundary,
     SanitizationError,
@@ -46,6 +50,77 @@ def test_http_sanitizer_uses_separate_connect_and_read_timeouts(monkeypatch):
 
     assert sanitizer.sanitize("get_issue", {"id": "DEMO-1"}) == {"safe": True}
     assert calls[0][1]["timeout"] == (2, 45)
+
+
+@pytest.mark.unit
+def test_cache_coalesces_identical_concurrent_sanitization_calls():
+    started = threading.Event()
+    release = threading.Event()
+
+    class BlockingSanitizer:
+        def __init__(self):
+            self.calls = 0
+
+        def sanitize(self, tool_name, payload):
+            self.calls += 1
+            started.set()
+            assert release.wait(timeout=2)
+            return {"safe": payload["id"]}
+
+    backend = BlockingSanitizer()
+    sanitizer = CachingOutputSanitizer(backend, ttl_seconds=60, max_entries=8)
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = [
+            executor.submit(sanitizer.sanitize, "get_issue", {"id": "SUP-1"})
+            for _ in range(8)
+        ]
+        assert started.wait(timeout=1)
+        time.sleep(0.05)
+        release.set()
+        results = [future.result(timeout=2) for future in futures]
+
+    assert backend.calls == 1
+    assert results == [{"safe": "SUP-1"}] * 8
+
+
+@pytest.mark.unit
+def test_cache_returns_independent_values_and_expires(monkeypatch):
+    backend = RecordingSanitizer({"items": ["safe"]})
+    now = 100.0
+    monkeypatch.setattr("youtrack_mcp.sanitization.time.monotonic", lambda: now)
+    sanitizer = CachingOutputSanitizer(backend, ttl_seconds=10, max_entries=8)
+
+    first = sanitizer.sanitize("get_issue", {"id": "SUP-1"})
+    first["items"].append("changed")
+    second = sanitizer.sanitize("get_issue", {"id": "SUP-1"})
+    now = 111.0
+    third = sanitizer.sanitize("get_issue", {"id": "SUP-1"})
+
+    assert second == {"items": ["safe"]}
+    assert third == {"items": ["safe"]}
+    assert len(backend.calls) == 2
+
+
+@pytest.mark.unit
+def test_cache_does_not_store_failures():
+    class FlakySanitizer:
+        def __init__(self):
+            self.calls = 0
+
+        def sanitize(self, tool_name, payload):
+            self.calls += 1
+            if self.calls == 1:
+                raise SanitizationError("unavailable")
+            return {"safe": True}
+
+    backend = FlakySanitizer()
+    sanitizer = CachingOutputSanitizer(backend)
+
+    with pytest.raises(SanitizationError):
+        sanitizer.sanitize("get_issue", {"id": "SUP-1"})
+
+    assert sanitizer.sanitize("get_issue", {"id": "SUP-1"}) == {"safe": True}
+    assert backend.calls == 2
 
 
 @pytest.mark.unit

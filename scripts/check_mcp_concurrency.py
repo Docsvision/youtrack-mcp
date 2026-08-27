@@ -43,36 +43,57 @@ async def run_user(
     *,
     url: str,
     issue_id: str,
+    request_timeout: float,
     start: asyncio.Event,
     initialized: asyncio.Queue[dict[str, Any]],
 ) -> dict[str, Any]:
-    timeout = httpx.Timeout(connect=3, read=90, write=10, pool=5)
-    async with httpx.AsyncClient(timeout=timeout) as http_client:
-        async with streamable_http_client(url, http_client=http_client) as streams:
-            read, write, _ = streams
-            async with ClientSession(read, write) as session:
-                initialized_at = time.monotonic()
-                await session.initialize()
-                initialization_seconds = time.monotonic() - initialized_at
-                await initialized.put(
-                    {"user": user_id, "initializationSeconds": initialization_seconds}
-                )
-                await start.wait()
+    timeout = httpx.Timeout(connect=3, read=request_timeout, write=10, pool=5)
+    initialized_sent = False
+    called_at: float | None = None
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as http_client:
+            async with streamable_http_client(url, http_client=http_client) as streams:
+                read, write, _ = streams
+                async with ClientSession(read, write) as session:
+                    initialized_at = time.monotonic()
+                    await session.initialize()
+                    initialization_seconds = time.monotonic() - initialized_at
+                    await initialized.put(
+                        {
+                            "user": user_id,
+                            "initializationSeconds": initialization_seconds,
+                        }
+                    )
+                    initialized_sent = True
+                    await start.wait()
 
-                called_at = time.monotonic()
-                response = await session.call_tool(
-                    "get_issue",
-                    {"issue_id": issue_id},
-                    read_timeout_seconds=timedelta(seconds=90),
-                )
-                duration_seconds = time.monotonic() - called_at
-                body = response.model_dump(mode="json")
-                return {
-                    "user": user_id,
-                    "durationSeconds": round(duration_seconds, 3),
-                    "success": not contains_tool_error(body),
-                    "isError": response.isError,
-                }
+                    called_at = time.monotonic()
+                    response = await session.call_tool(
+                        "get_issue",
+                        {"issue_id": issue_id},
+                        read_timeout_seconds=timedelta(seconds=request_timeout),
+                    )
+                    duration_seconds = time.monotonic() - called_at
+                    body = response.model_dump(mode="json")
+                    return {
+                        "user": user_id,
+                        "durationSeconds": round(duration_seconds, 3),
+                        "success": not contains_tool_error(body),
+                        "isError": response.isError,
+                    }
+    except Exception as exc:
+        if not initialized_sent:
+            await initialized.put(
+                {"user": user_id, "initializationError": type(exc).__name__}
+            )
+        return {
+            "user": user_id,
+            "durationSeconds": (
+                round(time.monotonic() - called_at, 3) if called_at else None
+            ),
+            "success": False,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
 
 
 async def probe_new_session(url: str) -> float:
@@ -124,6 +145,7 @@ async def run(args: argparse.Namespace) -> None:
                 user_id,
                 url=args.url,
                 issue_id=args.issue,
+                request_timeout=args.request_timeout,
                 start=start,
                 initialized=initialized,
             )
@@ -144,7 +166,18 @@ async def run(args: argparse.Namespace) -> None:
         "users": args.users,
         "successful": sum(result["success"] for result in results),
         "initializationMaxSeconds": round(
-            max(item["initializationSeconds"] for item in initialization), 3
+            max(
+                (
+                    item["initializationSeconds"]
+                    for item in initialization
+                    if "initializationSeconds" in item
+                ),
+                default=0,
+            ),
+            3,
+        ),
+        "initializationFailures": sum(
+            "initializationError" in item for item in initialization
         ),
         "initializeDuringLoadSeconds": round(protocol_latency, 3),
         "health": health,
@@ -160,9 +193,12 @@ def main() -> None:
     parser.add_argument("issue", help="Read-only YouTrack issue ID")
     parser.add_argument("--url", default="http://127.0.0.1:8001/mcp")
     parser.add_argument("--users", type=int, default=8)
+    parser.add_argument("--request-timeout", type=float, default=130)
     args = parser.parse_args()
     if args.users < 1:
         parser.error("--users must be positive")
+    if args.request_timeout <= 0:
+        parser.error("--request-timeout must be positive")
     asyncio.run(run(args))
 
 
