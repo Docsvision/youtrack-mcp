@@ -14,6 +14,30 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 
+def contains_tool_error(value: Any) -> bool:
+    """Detect fail-closed errors even when MCP returns them as JSON text."""
+    if isinstance(value, dict):
+        if value.get("status") == "error" or value.get("isError") is True:
+            return True
+        return any(contains_tool_error(item) for item in value.values())
+    if isinstance(value, list):
+        return any(contains_tool_error(item) for item in value)
+    if not isinstance(value, str):
+        return False
+
+    stripped = value.strip()
+    if stripped.startswith(("{", "[")):
+        try:
+            return contains_tool_error(json.loads(stripped))
+        except json.JSONDecodeError:
+            pass
+    lowered = value.casefold()
+    return any(
+        marker in lowered
+        for marker in ("server_busy", "output blocked", "sanitization failed")
+    )
+
+
 async def run_user(
     user_id: int,
     *,
@@ -43,11 +67,10 @@ async def run_user(
                 )
                 duration_seconds = time.monotonic() - called_at
                 body = response.model_dump(mode="json")
-                encoded = json.dumps(body, ensure_ascii=False)
                 return {
                     "user": user_id,
                     "durationSeconds": round(duration_seconds, 3),
-                    "success": not response.isError and "server_busy" not in encoded,
+                    "success": not contains_tool_error(body),
                     "isError": response.isError,
                 }
 
