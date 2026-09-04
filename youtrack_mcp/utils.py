@@ -23,7 +23,7 @@ def convert_timestamp_to_iso8601(timestamp_ms: int) -> str:
         # Create datetime object in UTC and format as ISO8601
         dt = datetime.fromtimestamp(timestamp_seconds, tz=timezone.utc)
         return dt.isoformat()
-    except ValueError, OSError, OverflowError:
+    except (ValueError, OSError, OverflowError):
         # Return original timestamp as string if conversion fails
         return str(timestamp_ms)
 

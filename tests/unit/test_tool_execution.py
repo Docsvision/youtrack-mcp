@@ -70,6 +70,28 @@ def test_execution_pool_rejects_work_beyond_pending_limit():
 
 
 @pytest.mark.unit
+def test_execution_pool_limits_worker_threads_to_configured_concurrency(monkeypatch):
+    observed_limiters = []
+
+    async def fake_run_sync(func, *, abandon_on_cancel, limiter):
+        observed_limiters.append(limiter)
+        return func()
+
+    monkeypatch.setattr(
+        "youtrack_mcp.tool_execution.anyio.to_thread.run_sync", fake_run_sync
+    )
+    pool = ToolExecutionPool(
+        max_concurrency=3,
+        max_pending=3,
+        queue_timeout_seconds=1,
+    )
+
+    assert asyncio.run(pool.run("tool", lambda: "done")) == "done"
+    assert observed_limiters == [pool._thread_limiter]
+    assert pool._thread_limiter.total_tokens == 3
+
+
+@pytest.mark.unit
 def test_async_tool_preserves_schema_signature():
     def original(issue_id: str, include_comments: bool = False) -> dict:
         return {"id": issue_id, "includeComments": include_comments}

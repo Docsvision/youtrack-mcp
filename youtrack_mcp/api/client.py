@@ -198,7 +198,7 @@ class YouTrackClient:
 
             try:
                 return self._parse_json_response(response)
-            except json.JSONDecodeError, UnicodeDecodeError:
+            except (json.JSONDecodeError, UnicodeDecodeError):
                 # Handle non-JSON responses
                 logger.warning(
                     f"Non-JSON response received from API: {response.content[:100]}"
@@ -215,7 +215,7 @@ class YouTrackClient:
             error_data = self._parse_json_response(response)
             if isinstance(error_data, dict) and "error" in error_data:
                 error_message = f"{error_message}: {error_data['error']}"
-        except json.JSONDecodeError, UnicodeDecodeError, KeyError:
+        except (json.JSONDecodeError, UnicodeDecodeError, KeyError):
             if response.content:
                 error_message = f"{error_message}: {response.content.decode('utf-8', errors='replace')}"
 
@@ -272,6 +272,7 @@ class YouTrackClient:
             logger.debug(f"{method} {url}")
 
         while retries <= self.max_retries:
+            response: requests.Response | None = None
             try:
                 kwargs.setdefault("timeout", self.request_timeout)
                 response = self._get_session().request(method, url, **kwargs)
@@ -305,6 +306,9 @@ class YouTrackClient:
                 # Unexpected errors
                 logger.exception(f"Unexpected error for {method} {url}: {str(e)}")
                 raise YouTrackAPIError(f"Unexpected error: {str(e)}")
+            finally:
+                if response is not None:
+                    response.close()
 
         # If we got here, we've exceeded retries
         if last_error:
@@ -430,7 +434,10 @@ class YouTrackClient:
             verify=session.verify,
             timeout=self.request_timeout,
         )
-        return self._handle_response(response)
+        try:
+            return self._handle_response(response)
+        finally:
+            response.close()
 
     def get_bytes(
         self,
@@ -463,15 +470,18 @@ class YouTrackClient:
             stream=True,
             timeout=self.request_timeout,
         )
-        status_code = response.status_code
-        if 200 <= status_code < 300:
-            return response.content
-        # Delegate error handling to common handler (will raise)
-        self._handle_response(response)
-        # Should not reach here
-        raise YouTrackAPIError(
-            f"Unexpected error downloading from {endpoint}", status_code, response
-        )
+        try:
+            status_code = response.status_code
+            if 200 <= status_code < 300:
+                return response.content
+            # Delegate error handling to common handler (will raise)
+            self._handle_response(response)
+            # Should not reach here
+            raise YouTrackAPIError(
+                f"Unexpected error downloading from {endpoint}", status_code, response
+            )
+        finally:
+            response.close()
 
     def close(self) -> None:
         """Close all thread-local API client sessions."""

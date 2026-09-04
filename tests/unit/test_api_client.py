@@ -271,6 +271,7 @@ class TestYouTrackClient:
             timeout=(3.0, 30.0),
         )
         assert result == {"test": "data"}
+        response.close.assert_called_once()
 
     @pytest.mark.unit
     def test_make_request_retry_on_server_error(self, client, mock_session):
@@ -291,6 +292,8 @@ class TestYouTrackClient:
 
         assert mock_session.request.call_count == 2
         assert result == {"test": "data"}
+        error_response.close.assert_called_once()
+        success_response.close.assert_called_once()
 
     @pytest.mark.unit
     def test_make_request_max_retries_exceeded(self, client, mock_session):

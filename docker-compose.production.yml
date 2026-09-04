@@ -8,6 +8,10 @@ x-mcp-common: &mcp-common
   restart: unless-stopped
   init: true
   mem_limit: 1g
+  ulimits:
+    nofile:
+      soft: "${MCP_NOFILE_SOFT:-65536}"
+      hard: "${MCP_NOFILE_HARD:-65536}"
   read_only: true
   tmpfs:
     - /tmp:size=64m,mode=1777

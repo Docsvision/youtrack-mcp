@@ -68,6 +68,7 @@ class HttpOutputSanitizer:
     connect_timeout_seconds: float = 2.0
 
     def sanitize(self, tool_name: str, payload: Any) -> Any:
+        response: requests.Response | None = None
         try:
             response = requests.post(
                 self.url,
@@ -76,13 +77,14 @@ class HttpOutputSanitizer:
             )
             response.raise_for_status()
             body = response.json()
+            if not isinstance(body, dict) or "payload" not in body:
+                raise SanitizationError("sanitizer service returned an invalid response")
+            return body["payload"]
         except (requests.RequestException, ValueError) as exc:
             raise SanitizationError("sanitizer service request failed") from exc
-
-        if not isinstance(body, dict) or "payload" not in body:
-            raise SanitizationError("sanitizer service returned an invalid response")
-
-        return body["payload"]
+        finally:
+            if response is not None:
+                response.close()
 
 
 class CachingOutputSanitizer:

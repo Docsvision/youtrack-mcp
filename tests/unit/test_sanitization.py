@@ -29,17 +29,23 @@ class RecordingSanitizer:
 @pytest.mark.unit
 def test_http_sanitizer_uses_separate_connect_and_read_timeouts(monkeypatch):
     class Response:
+        closed = False
+
         def raise_for_status(self):
             return None
 
         def json(self):
             return {"payload": {"safe": True}}
 
+        def close(self):
+            self.closed = True
+
     calls = []
+    response = Response()
 
     def fake_post(url, **kwargs):
         calls.append((url, kwargs))
-        return Response()
+        return response
 
     monkeypatch.setattr("youtrack_mcp.sanitization.requests.post", fake_post)
     sanitizer = HttpOutputSanitizer(
@@ -50,6 +56,7 @@ def test_http_sanitizer_uses_separate_connect_and_read_timeouts(monkeypatch):
 
     assert sanitizer.sanitize("get_issue", {"id": "DEMO-1"}) == {"safe": True}
     assert calls[0][1]["timeout"] == (2, 45)
+    assert response.closed
 
 
 @pytest.mark.unit

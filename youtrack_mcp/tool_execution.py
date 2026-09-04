@@ -36,6 +36,12 @@ class ToolExecutionPool:
         self.max_pending = max_pending
         self.queue_timeout_seconds = queue_timeout_seconds
         self._slots = asyncio.Semaphore(max_concurrency)
+        # AnyIO otherwise uses its process-wide thread limiter (40 by
+        # default). Each blocking worker can establish a per-thread requests
+        # connection pool in the YouTrack clients, so letting the executor
+        # rotate through dozens of threads can exhaust the container's FD
+        # limit even though the MCP pool admits only a few tools at once.
+        self._thread_limiter = anyio.CapacityLimiter(max_concurrency)
         self._state_lock = asyncio.Lock()
         self._pending = 0
         self._active = 0
@@ -116,6 +122,7 @@ class ToolExecutionPool:
                 result = await anyio.to_thread.run_sync(
                     partial(func, *args, **kwargs),
                     abandon_on_cancel=False,
+                    limiter=self._thread_limiter,
                 )
             finally:
                 duration_seconds = time.monotonic() - started_at
